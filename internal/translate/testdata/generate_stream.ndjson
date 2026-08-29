@@ -1,0 +1,9 @@
+{"model":"qwen3:0.6b","created_at":"2026-08-29T20:01:57.089067786Z","response":"Hello","done":false}
+{"model":"qwen3:0.6b","created_at":"2026-08-29T20:01:57.097477565Z","response":"!","done":false}
+{"model":"qwen3:0.6b","created_at":"2026-08-29T20:01:57.105889074Z","response":" How","done":false}
+{"model":"qwen3:0.6b","created_at":"2026-08-29T20:01:57.114471573Z","response":" can","done":false}
+{"model":"qwen3:0.6b","created_at":"2026-08-29T20:01:57.122882873Z","response":" I","done":false}
+{"model":"qwen3:0.6b","created_at":"2026-08-29T20:01:57.131246412Z","response":" assist","done":false}
+{"model":"qwen3:0.6b","created_at":"2026-08-29T20:01:57.139713741Z","response":" you","done":false}
+{"model":"qwen3:0.6b","created_at":"2026-08-29T20:01:57.14815803Z","response":" today","done":false}
+{"model":"qwen3:0.6b","created_at":"2026-08-29T20:01:57.14823208Z","response":"","done":true,"done_reason":"length","context":[151644,872,198,36790,15588,608,2152,5854,766,151645,198,151644,77091,198,151667,271,151668,271,9707,0,2585,646,358,7789,498,3351],"total_duration":227185904,"load_duration":158295691,"prompt_eval_count":18,"prompt_eval_duration":8752000,"eval_count":8,"eval_duration":59095000}
