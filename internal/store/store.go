@@ -75,6 +75,9 @@ type Config struct {
 	ModelFamilies []string `json:"model_families"`
 	ModelType     string   `json:"model_type"`
 	FileType      string   `json:"file_type"`
+	Renderer      string   `json:"renderer"`
+	Parser        string   `json:"parser"`
+	Capabilities  []string `json:"capabilities"`
 }
 
 // Layer is one entry of a manifest.
@@ -315,28 +318,136 @@ func (m *Model) Details() api.ModelDetails {
 	return d
 }
 
-// Capabilities reports what the model can do, mirroring ollama's own list.
-// "completion" is universal; the rest are inferred from the projector layer and
-// from what the chat template actually references.
+// Capabilities reports what the model can do.
+//
+// This follows ollama's /api/show, which computes capabilities live from the
+// model itself. Ollama's /api/tags answers from a cache built at pull time and
+// the two genuinely disagree — /api/show reports audio and vision for
+// gemma4:e4b where /api/tags reports neither. /api/show is the endpoint clients
+// query to decide whether to send tools or ask for thinking, so it is the one
+// worth matching.
 func (m *Model) Capabilities() []model.Capability {
-	caps := []model.Capability{model.CapabilityCompletion}
+	var caps []model.Capability
+	add := func(c model.Capability) {
+		for _, existing := range caps {
+			if existing == c {
+				return
+			}
+		}
+		caps = append(caps, c)
+	}
 
-	tmpl := m.Template
-	if f, err := m.GGUF(); err == nil {
-		if jinja, ok := f.String("tokenizer.chat_template"); ok {
-			tmpl += jinja
+	for _, c := range m.Config.Capabilities {
+		add(model.Capability(c))
+	}
+
+	f, err := m.GGUF()
+	if err != nil {
+		add(model.CapabilityCompletion)
+	} else {
+		// The GGUF's own chat template is what llama.cpp will actually apply,
+		// so it is the honest source for what the model can be asked to do.
+		tmpl, _ := f.String("tokenizer.chat_template")
+		if chatTemplateHasTools(tmpl) {
+			add(model.CapabilityTools)
+		}
+		if chatTemplateHasThinking(tmpl) {
+			add(model.CapabilityThinking)
+		}
+
+		if _, ok := f.KV["pooling_type"]; ok {
+			add(model.CapabilityEmbedding)
+		} else {
+			add(model.CapabilityCompletion)
+		}
+		// These live under the architecture namespace, e.g. gemma4.vision.block_count.
+		if _, ok := f.ArchKV("vision.block_count"); ok {
+			add(model.CapabilityVision)
+		}
+		if _, ok := f.ArchKV("audio.block_count"); ok {
+			add(model.CapabilityAudio)
 		}
 	}
-	if strings.Contains(tmpl, ".Tools") || strings.Contains(tmpl, "tools") {
-		caps = append(caps, model.CapabilityTools)
-	}
-	if strings.Contains(tmpl, ".Thinking") || strings.Contains(tmpl, "think") {
-		caps = append(caps, model.CapabilityThinking)
-	}
+
 	if m.ProjectorPath != "" {
-		caps = append(caps, model.CapabilityVision)
+		add(model.CapabilityVision)
 	}
+
+	if m.Template != "" {
+		// Go templates expose these as template variables.
+		if strings.Contains(m.Template, "Tools") {
+			add(model.CapabilityTools)
+		}
+		if strings.Contains(m.Template, ".Thinking") {
+			add(model.CapabilityThinking)
+		}
+	}
+
+	if tools, thinking, ok := parserCapabilities(m.Config.Parser); ok {
+		if tools {
+			add(model.CapabilityTools)
+		}
+		if thinking {
+			add(model.CapabilityThinking)
+		}
+	}
+
+	if m.Config.ModelFamily == "gptoss" || m.Config.ModelFamily == "gpt-oss" {
+		add(model.CapabilityThinking)
+	}
+
 	return caps
+}
+
+// parserCapabilities reports what one of ollama's built-in parsers supports.
+//
+// Ollama keeps this as a registry of parser implementations that changes with
+// every release. Rather than mirror that registry — the kind of permanent
+// rebase tax this project exists to avoid — this covers the parsers that models
+// in the store actually declare. An unknown parser reports nothing and the
+// model's own chat template decides, which is the right fallback: the template
+// is what llama.cpp will apply regardless.
+func parserCapabilities(name string) (tools, thinking, known bool) {
+	switch name {
+	case "":
+		return false, false, false
+	case "qwen3.5", "ornith", "qwen3-coder", "gemma4", "harmony", "deepseek3",
+		"cogito", "glm-4.7", "olmo3-think", "lfm2-thinking", "qwen3-vl-thinking":
+		return true, true, true
+	case "qwen3", "qwen3-vl-instruct", "ministral", "olmo3", "lfm2", "functiongemma":
+		return true, false, true
+	case "passthrough":
+		return false, false, true
+	}
+	return false, false, false
+}
+
+// usesOllamaRenderedChat reports whether ollama would render the chat itself
+// rather than handing the messages to the model's own jinja template.
+func (m *Model) usesOllamaRenderedChat() bool {
+	return m.Config.Renderer != "" || m.Config.Parser != "" || m.Template != ""
+}
+
+func chatTemplateHasTools(tmpl string) bool {
+	if tmpl == "" {
+		return false
+	}
+	return strings.Contains(tmpl, "tools") || strings.Contains(tmpl, "tool_call")
+}
+
+func chatTemplateHasThinking(tmpl string) bool {
+	if tmpl == "" {
+		return false
+	}
+	if strings.Contains(tmpl, "<think>") && strings.Contains(tmpl, "</think>") {
+		return true
+	}
+	// Some Qwen and DeepSeek templates strip earlier reasoning by splitting
+	// assistant content on the closing tag; reasoning is still extractable.
+	return (strings.Contains(tmpl, "content.split('</think>')") ||
+		strings.Contains(tmpl, `content.split("</think>")`)) &&
+		!strings.Contains(tmpl, "reasoning_content") &&
+		!strings.Contains(tmpl, "<SPECIAL_12>")
 }
 
 // ListResponse renders the model as an /api/tags entry.

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/ollama/ollama/api"
@@ -150,6 +151,57 @@ func TestCanonicalName(t *testing.T) {
 		got, ok := canonicalName(c.rel)
 		if !ok || got != c.want {
 			t.Errorf("canonicalName(%q) = %q, %v; want %q", c.rel, got, ok, c.want)
+		}
+	}
+}
+
+// showGolden is /api/show captured from the real ollama for every local model.
+func showGolden(t *testing.T) map[string]struct {
+	Capabilities []string         `json:"capabilities"`
+	Details      api.ModelDetails `json:"details"`
+	Parameters   string           `json:"parameters"`
+} {
+	t.Helper()
+	b, err := os.ReadFile("testdata/show.json")
+	if err != nil {
+		t.Skip("no captured show.json")
+	}
+	var out map[string]struct {
+		Capabilities []string         `json:"capabilities"`
+		Details      api.ModelDetails `json:"details"`
+		Parameters   string           `json:"parameters"`
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestCapabilitiesMatchOllamaShow checks capability detection against ollama's
+// live computation. /api/show is the target rather than /api/tags: tags answers
+// from a cache built at pull time and the two disagree in ollama itself, while
+// show is what clients query before deciding to send tools or request thinking.
+func TestCapabilitiesMatchOllamaShow(t *testing.T) {
+	s := testStore(t)
+	want := showGolden(t)
+
+	models, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range models {
+		m := &models[i]
+		w, ok := want[m.Name]
+		if !ok {
+			continue
+		}
+		got := make([]string, 0, 4)
+		for _, c := range m.Capabilities() {
+			got = append(got, string(c))
+		}
+		sort.Strings(got)
+		if !reflect.DeepEqual(got, w.Capabilities) {
+			t.Errorf("%s: capabilities = %v, want %v", m.Name, got, w.Capabilities)
 		}
 	}
 }
