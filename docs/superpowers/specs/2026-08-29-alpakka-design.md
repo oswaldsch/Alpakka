@@ -133,7 +133,7 @@ overrides. Listen address is a config key.
 listen = "127.0.0.1:11435"
 
 [defaults]
-ctx = 32768
+num_ctx = 32768
 cache_type_k = "q8_0"
 cache_type_v = "q8_0"
 reasoning_effort = "low"
@@ -144,6 +144,9 @@ spec_type = "draft-mtp"
 spec_draft_n_max = 2
 projector = false
 ```
+
+Config keys use the same names as the `options` object, so anything settable
+per request is settable as a default.
 
 `reasoning_effort` accepts `low`, `medium`, `xhigh` only; the Qwen3.8 template
 rejects anything else and silently upgrades `high` to `xhigh`.
