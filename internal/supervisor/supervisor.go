@@ -152,6 +152,7 @@ func (s *Supervisor) start(rt config.Runtime) (*Instance, error) {
 		baseURL: fmt.Sprintf("http://127.0.0.1:%d", port),
 		ready:   make(chan struct{}),
 		log:     newRing(400),
+		notable: newRing(40),
 		started: time.Now(),
 	}
 

@@ -28,7 +28,8 @@ type Instance struct {
 	ready    chan struct{}
 	readyErr error
 
-	log *ring
+	log     *ring
+	notable *ring
 
 	mu        sync.Mutex
 	exited    bool
@@ -131,6 +132,9 @@ func (i *Instance) observe(line string) {
 		i.mu.Unlock()
 		return
 	}
+	if isNotable(line) {
+		i.notable.add(line)
+	}
 	if m := reCPUBuffer.FindStringSubmatch(line); m != nil {
 		mib, _ := strconv.ParseFloat(m[1], 64)
 		i.mu.Lock()
@@ -141,6 +145,41 @@ func (i *Instance) observe(line string) {
 		}
 		i.mu.Unlock()
 	}
+}
+
+// llama-server prefixes each line with a timestamp and a level letter, so an
+// error line looks like "0.01.563.011 E ...".
+var reLevel = regexp.MustCompile(`^[0-9.]+ ([A-Z]) `)
+
+// isNotable picks out the lines worth showing a user when a load fails. The
+// default log is dominated by per-layer debug output, and burying the actual
+// cause in it makes a clean failure useless.
+func isNotable(line string) bool {
+	if m := reLevel.FindStringSubmatch(line); m != nil {
+		switch m[1] {
+		case "E", "W":
+			return true
+		}
+	}
+	lower := strings.ToLower(line)
+	for _, needle := range []string{
+		"failed", "error", "cannot", "unable", "insufficient",
+		"out of memory", "not enough", "terminate", "abort",
+	} {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// diagnosis returns the most useful explanation of a failed load: the lines
+// llama-server flagged as problems, or the raw tail when it flagged none.
+func (i *Instance) diagnosis() string {
+	if s := i.notable.tail(12); s != "" {
+		return s
+	}
+	return i.log.tail(20)
 }
 
 func (i *Instance) reap() {
@@ -159,12 +198,12 @@ func (i *Instance) probe(timeout time.Duration, logf Logf) {
 	deadline := time.Now().Add(timeout)
 	for {
 		if i.dead() {
-			i.readyErr = fmt.Errorf("llama-server exited during load:\n%s", i.log.tail(25))
+			i.readyErr = fmt.Errorf("llama-server exited during load:\n%s", i.diagnosis())
 			return
 		}
 		if time.Now().After(deadline) {
 			i.readyErr = fmt.Errorf("llama-server did not become ready within %s:\n%s",
-				timeout, i.log.tail(25))
+				timeout, i.diagnosis())
 			i.stop()
 			return
 		}
