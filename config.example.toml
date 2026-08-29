@@ -1,0 +1,26 @@
+# alpakka — local model server settings.
+
+[server]
+listen = "127.0.0.1:11435"
+
+[llama]
+lib_dir = "/usr/local/lib/ollama"
+backend = "rocm_v7_2"
+
+[defaults]
+num_ctx = 32768
+cache_type_k = "q8_0"
+cache_type_v = "q8_0"
+flash_attn = "on"
+keep_alive = "5m"
+
+# The working coding model. MTP speculation is the only lever that beats the
+# card's ~320 GB/s memory bandwidth, and n=2 is the value that wins across
+# workloads rather than only on predictable text.
+[models."qwen3.8-27b-q3-32k"]
+spec_type = "draft-mtp"
+spec_draft_n_max = 2
+reasoning_effort = "low"
+# The vision projector reserves ~1.16 GB whether or not it is used, which is
+# what pushed weights onto the CPU under ollama.
+projector = false
