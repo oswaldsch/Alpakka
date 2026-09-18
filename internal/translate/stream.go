@@ -161,12 +161,30 @@ func Chat(r io.Reader, model string, load time.Duration, start time.Time, emit f
 		return err
 	}
 
-	acc.Metrics.TotalDuration = time.Since(start)
+	// Ollama delivers tool calls in their own chunk before the final one, and
+	// leaves the final message empty. A client that reads tool_calls only from
+	// non-final chunks — a reasonable reading of ollama's stream — would miss
+	// them entirely if they rode on the done message.
+	if calls := acc.ToolCalls(); len(calls) > 0 {
+		err := emit(api.ChatResponse{
+			Model:     model,
+			CreatedAt: time.Now().UTC(),
+			Message:   api.Message{Role: "assistant", ToolCalls: calls},
+			Done:      false,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	// Ollama's total_duration spans the whole request, the load included, so a
+	// cold start must not report a total smaller than its own load_duration.
+	acc.Metrics.TotalDuration = load + time.Since(start)
 	acc.Metrics.LoadDuration = load
 	return emit(api.ChatResponse{
 		Model:      model,
 		CreatedAt:  time.Now().UTC(),
-		Message:    api.Message{Role: "assistant", ToolCalls: acc.ToolCalls()},
+		Message:    api.Message{Role: "assistant"},
 		Done:       true,
 		DoneReason: acc.DoneReason(),
 		Metrics:    acc.Metrics,
@@ -195,7 +213,9 @@ func Generate(r io.Reader, model string, load time.Duration, start time.Time, em
 		return err
 	}
 
-	acc.Metrics.TotalDuration = time.Since(start)
+	// Ollama's total_duration spans the whole request, the load included, so a
+	// cold start must not report a total smaller than its own load_duration.
+	acc.Metrics.TotalDuration = load + time.Since(start)
 	acc.Metrics.LoadDuration = load
 	return emit(api.GenerateResponse{
 		Model:      model,
@@ -213,10 +233,14 @@ func CollectChat(r io.Reader, model string, load time.Duration, start time.Time)
 	var content, thinking bytes.Buffer
 	var final api.ChatResponse
 
+	var calls []api.ToolCall
 	err := Chat(r, model, load, start, func(resp api.ChatResponse) error {
 		if !resp.Done {
 			content.WriteString(resp.Message.Content)
 			thinking.WriteString(resp.Message.Thinking)
+			// Tool calls now arrive in their own non-final chunk, so the
+			// collected form has to pick them up from there.
+			calls = append(calls, resp.Message.ToolCalls...)
 			return nil
 		}
 		final = resp
@@ -227,6 +251,7 @@ func CollectChat(r io.Reader, model string, load time.Duration, start time.Time)
 	}
 	final.Message.Content = content.String()
 	final.Message.Thinking = thinking.String()
+	final.Message.ToolCalls = calls
 	return final, nil
 }
 

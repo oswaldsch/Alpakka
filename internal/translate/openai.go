@@ -33,6 +33,24 @@ type Request struct {
 	Stop          []string  `json:"stop,omitempty"`
 	Tools         api.Tools `json:"tools,omitempty"`
 
+	// llama-server accepts the rest of ollama's samplers under these exact
+	// names, so they are forwarded rather than dropped.
+	Mirostat         *int     `json:"mirostat,omitempty"`
+	MirostatTau      *float32 `json:"mirostat_tau,omitempty"`
+	MirostatEta      *float32 `json:"mirostat_eta,omitempty"`
+	PresencePenalty  *float32 `json:"presence_penalty,omitempty"`
+	FrequencyPenalty *float32 `json:"frequency_penalty,omitempty"`
+	RepeatLastN      *int     `json:"repeat_last_n,omitempty"`
+	TypicalP         *float32 `json:"typical_p,omitempty"`
+	NumKeep          *int     `json:"n_keep,omitempty"`
+
+	// CachePrompt and IgnoreEOS are llama.cpp's own completion parameters, set
+	// only by the benchmark endpoint: reusing a cached prefix would report a
+	// second run's prefill as free, and a model that stops early would measure
+	// decode over a token count the caller did not choose.
+	CachePrompt *bool `json:"cache_prompt,omitempty"`
+	IgnoreEOS   *bool `json:"ignore_eos,omitempty"`
+
 	ResponseFormat json.RawMessage `json:"response_format,omitempty"`
 
 	// ChatTemplateKwargs is llama.cpp's hook into the jinja template. This is
@@ -110,9 +128,11 @@ type Timings struct {
 	PredictedMS float64 `json:"predicted_ms"`
 }
 
-// Metrics converts llama.cpp's counters into ollama's.
+// Metrics converts llama.cpp's counters into ollama's. totalDuration is the
+// time spent generating; the load is added because ollama's total_duration
+// covers the whole request.
 func (c *Chunk) Metrics(loadDuration, totalDuration time.Duration) api.Metrics {
-	m := api.Metrics{LoadDuration: loadDuration, TotalDuration: totalDuration}
+	m := api.Metrics{LoadDuration: loadDuration, TotalDuration: loadDuration + totalDuration}
 	if c.Usage != nil {
 		m.PromptEvalCount = c.Usage.PromptTokens
 		m.EvalCount = c.Usage.CompletionTokens
@@ -187,6 +207,15 @@ func BuildRequest(model string, msgs []Message, p config.Profile, stream bool) *
 		RepeatPenalty: p.RepeatPenalty,
 		Seed:          p.Seed,
 		Stop:          p.Stop,
+
+		Mirostat:         p.Mirostat,
+		MirostatTau:      p.MirostatTau,
+		MirostatEta:      p.MirostatEta,
+		PresencePenalty:  p.PresencePenalty,
+		FrequencyPenalty: p.FrequencyPenalty,
+		RepeatLastN:      p.RepeatLastN,
+		TypicalP:         p.TypicalP,
+		NumKeep:          p.NumKeep,
 	}
 	// Ollama uses -1 for "no limit"; OpenAI wants the field absent.
 	if p.NumPredict != nil && *p.NumPredict >= 0 {
@@ -203,7 +232,9 @@ func BuildRequest(model string, msgs []Message, p config.Profile, stream bool) *
 	return r
 }
 
-// FromOllamaMessages converts ollama messages to OpenAI ones.
+// FromOllamaMessages converts ollama messages to OpenAI ones. Message.Thinking
+// is never forwarded: OpenAI's message shape has no slot for a historical
+// reasoning block, and the model's own template drops it there too.
 func FromOllamaMessages(in []api.Message) []Message {
 	out := make([]Message, 0, len(in))
 	for _, m := range in {

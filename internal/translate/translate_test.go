@@ -221,15 +221,42 @@ data: [DONE]
 	if err != nil {
 		t.Fatal(err)
 	}
-	last := got[len(got)-1]
-	if len(last.Message.ToolCalls) != 1 {
-		t.Fatalf("got %d tool calls, want 1", len(last.Message.ToolCalls))
+	if len(got) < 2 {
+		t.Fatalf("got %d chunks, want at least 2", len(got))
 	}
-	call := last.Message.ToolCalls[0]
+
+	// Ollama's framing: the tool calls ride on their own chunk, and the final
+	// one carries only done, done_reason and the metrics.
+	last := got[len(got)-1]
+	if !last.Done || last.DoneReason != "stop" {
+		t.Errorf("final chunk: done=%v done_reason=%q", last.Done, last.DoneReason)
+	}
+	if len(last.Message.ToolCalls) != 0 {
+		t.Errorf("final chunk carried %d tool calls; ollama leaves it empty",
+			len(last.Message.ToolCalls))
+	}
+
+	calls := got[len(got)-2]
+	if calls.Done {
+		t.Error("the tool call chunk should not be the done chunk")
+	}
+	if len(calls.Message.ToolCalls) != 1 {
+		t.Fatalf("got %d tool calls, want 1", len(calls.Message.ToolCalls))
+	}
+	call := calls.Message.ToolCalls[0]
 	if call.Function.Name != "get_weather" {
 		t.Errorf("name = %q", call.Function.Name)
 	}
 	if got, ok := call.Function.Arguments.Get("city"); !ok || got != "Berlin" {
 		t.Errorf("arguments[city] = %v, want Berlin", got)
+	}
+
+	// The non-streaming form has to find them on that chunk, not the last one.
+	resp, err := CollectChat(strings.NewReader(sse), "m", 0, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Message.ToolCalls) != 1 {
+		t.Errorf("CollectChat lost the tool calls: %+v", resp.Message)
 	}
 }

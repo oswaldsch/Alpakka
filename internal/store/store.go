@@ -174,11 +174,27 @@ func (s *Store) List() ([]Model, error) {
 }
 
 // Get resolves a model by name. The tag defaults to "latest".
+//
+// The name maps directly onto a manifest path, so the common case is one open
+// rather than a walk over the whole store. Every request resolves a model, and
+// /api/ps is polled, so the difference is between a handful of syscalls and
+// re-reading every manifest and config blob on the machine.
 func (s *Store) Get(name string) (*Model, error) {
 	want := name
 	if !strings.Contains(path(want), ":") {
 		want += ":latest"
 	}
+
+	if rel, ok := manifestRel(want); ok {
+		if canonical, ok := canonicalName(rel); ok && canonical == want {
+			if m, err := s.load(filepath.Join(s.root, "manifests", rel), canonical); err == nil {
+				return m, nil
+			}
+		}
+	}
+
+	// Fall back to a scan: a manifest may sit somewhere the direct mapping does
+	// not predict, and being right matters more here than being quick.
 	models, err := s.List()
 	if err != nil {
 		return nil, err
@@ -189,6 +205,36 @@ func (s *Store) Get(name string) (*Model, error) {
 		}
 	}
 	return nil, fmt.Errorf("model %q not found", name)
+}
+
+// manifestRel is canonicalName in reverse: it turns "qwen3:0.6b" back into
+// "registry.ollama.ai/library/qwen3/0.6b". It reports false for anything that
+// could escape the store, since the name arrives from an HTTP request.
+func manifestRel(name string) (string, bool) {
+	repo, tag := name, ""
+	p := path(name)
+	i := strings.LastIndex(p, ":")
+	if i < 0 {
+		return "", false
+	}
+	off := len(name) - len(p)
+	repo, tag = name[:off+i], name[off+i+1:]
+
+	parts := strings.Split(repo, "/")
+	switch len(parts) {
+	case 1:
+		parts = append([]string{"registry.ollama.ai", "library"}, parts...)
+	case 2:
+		parts = append([]string{"registry.ollama.ai"}, parts...)
+	}
+	parts = append(parts, tag)
+
+	for _, part := range parts {
+		if part == "" || part == "." || part == ".." || strings.ContainsAny(part, `/\`) {
+			return "", false
+		}
+	}
+	return strings.Join(parts, "/"), true
 }
 
 // path strips any registry host so a colon in "host:port" is not mistaken for
@@ -448,6 +494,43 @@ func chatTemplateHasThinking(tmpl string) bool {
 		strings.Contains(tmpl, `content.split("</think>")`)) &&
 		!strings.Contains(tmpl, "reasoning_content") &&
 		!strings.Contains(tmpl, "<SPECIAL_12>")
+}
+
+// IsEmbedding reports whether the model produces embeddings rather than text.
+//
+// llama-server has to be started with --embeddings for one and without it for
+// the other, so this decides a process-level flag, not a request field.
+func (m *Model) IsEmbedding() bool {
+	for _, c := range m.Capabilities() {
+		if c == model.CapabilityEmbedding {
+			return true
+		}
+	}
+	return false
+}
+
+// DeclaresPooling reports whether the GGUF names its own pooling type, which
+// dedicated embedding models do and causal models do not.
+func (m *Model) DeclaresPooling() bool {
+	f, err := m.GGUF()
+	if err != nil {
+		return false
+	}
+	_, ok := f.KV["pooling_type"]
+	return ok
+}
+
+// TrainedContext is the context length the model was trained for, or zero when
+// the GGUF header does not say.
+func (m *Model) TrainedContext() int {
+	f, err := m.GGUF()
+	if err != nil {
+		return 0
+	}
+	if n, ok := f.ArchUint("context_length"); ok {
+		return int(n)
+	}
+	return 0
 }
 
 // ListResponse renders the model as an /api/tags entry.
