@@ -33,12 +33,45 @@ func Apply(p Profile, opts map[string]any) (Profile, error) {
 			err = setInt(&out.SpecDraftNMin, k, v)
 		case "num_gpu":
 			err = setInt(&out.NumGPU, k, v)
+		case "allow_partial_offload":
+			err = setBool(&out.AllowPartialOffload, k, v)
+		case "gpu_vram_cap_mib":
+			err = setInt(&out.GPUVRAMCapMiB, k, v)
 		case "flash_attn":
 			err = setStr(&out.FlashAttn, k, v)
 		case "backend":
 			err = setStr(&out.Backend, k, v)
+		case "num_cpu_moe":
+			err = setInt(&out.NumCPUMoE, k, v)
+		case "override_tensor":
+			err = setStrings(&out.OverrideTensor, k, v)
+		case "rpc_servers":
+			err = setStrings(&out.RPCServers, k, v)
+		case "device":
+			if str, ok := v.(string); ok {
+				v = splitList(str)
+			}
+			err = setStrings((*[]string)(&out.Device), k, v)
+		case "tensor_split":
+			err = setStr(&out.TensorSplit, k, v)
+		case "split_mode":
+			err = setStr(&out.SplitMode, k, v)
+		case "main_gpu":
+			err = setInt(&out.MainGPU, k, v)
+		case "no_kv_offload":
+			err = setBool(&out.NoKVOffload, k, v)
+		case "moe_expert_cache":
+			err = setInt(&out.MoEExpertCache, k, v)
+		case "moe_expert_cache_inserts":
+			err = setInt(&out.MoEExpertCacheInserts, k, v)
+		case "kv_stream_arena_mib":
+			err = setInt(&out.KVStreamArenaMiB, k, v)
 		case "projector":
 			err = setBool(&out.Projector, k, v)
+		case "embeddings":
+			err = setBool(&out.Embeddings, k, v)
+		case "pooling":
+			err = setStr(&out.Pooling, k, v)
 
 		// Request-level.
 		case "reasoning_effort":
@@ -59,6 +92,22 @@ func Apply(p Profile, opts map[string]any) (Profile, error) {
 			err = setInt(&out.NumPredict, k, v)
 		case "stop":
 			err = setStrings(&out.Stop, k, v)
+		case "mirostat":
+			err = setInt(&out.Mirostat, k, v)
+		case "mirostat_tau":
+			err = setFloat(&out.MirostatTau, k, v)
+		case "mirostat_eta":
+			err = setFloat(&out.MirostatEta, k, v)
+		case "presence_penalty":
+			err = setFloat(&out.PresencePenalty, k, v)
+		case "frequency_penalty":
+			err = setFloat(&out.FrequencyPenalty, k, v)
+		case "repeat_last_n":
+			err = setInt(&out.RepeatLastN, k, v)
+		case "typical_p":
+			err = setFloat(&out.TypicalP, k, v)
+		case "num_keep":
+			err = setInt(&out.NumKeep, k, v)
 
 		default:
 			// Unknown keys are ignored, exactly as ollama ignores ours.

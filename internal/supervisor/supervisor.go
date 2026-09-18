@@ -13,11 +13,13 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/oswald/alpakka/internal/config"
+	"github.com/oswald/alpakka/internal/wol"
 )
 
 // Logf receives human-readable supervisor events.
@@ -26,7 +28,11 @@ type Logf func(format string, args ...any)
 // Supervisor manages the single llama-server process.
 type Supervisor struct {
 	llama config.Llama
-	logf  Logf
+	// wol maps an RPC endpoint's "host:port" to the MAC address behind it, from
+	// Config.WoL. An endpoint absent here is assumed already running, as every
+	// endpoint was before Wake-on-LAN existed.
+	wol  map[string]string
+	logf Logf
 
 	// LoadTimeout bounds a model load. Thirteen gigabytes off a cold page
 	// cache takes tens of seconds, so this is deliberately generous.
@@ -37,11 +43,11 @@ type Supervisor struct {
 }
 
 // New creates a supervisor driving the given llama.cpp build.
-func New(llama config.Llama, logf Logf) *Supervisor {
+func New(llama config.Llama, wolMACs map[string]string, logf Logf) *Supervisor {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &Supervisor{llama: llama, logf: logf, LoadTimeout: 5 * time.Minute}
+	return &Supervisor{llama: llama, wol: wolMACs, logf: logf, LoadTimeout: 5 * time.Minute}
 }
 
 // Ensure returns a ready instance running exactly rt, starting or replacing the
@@ -49,43 +55,73 @@ func New(llama config.Llama, logf Logf) *Supervisor {
 //
 // Concurrent callers that want the same runtime share one load: the second
 // caller waits on the same readiness signal instead of starting a rival server.
+//
+// The returned instance carries a reference held on the caller's behalf, so
+// neither the evictor nor a competing reload can stop it. The caller must
+// Release it when the request is done.
 func (s *Supervisor) Ensure(ctx context.Context, rt config.Runtime) (*Instance, error) {
-	s.mu.Lock()
-	if s.cur != nil && s.cur.rt == rt && !s.cur.dead() {
-		inst := s.cur
-		s.mu.Unlock()
-		if err := inst.wait(ctx); err != nil {
+	for {
+		s.mu.Lock()
+		cur := s.cur
+
+		if cur != nil && cur.rt == rt && !cur.dead() {
+			s.mu.Unlock()
+			if err := cur.wait(ctx); err != nil {
+				return nil, err
+			}
+			if cur.acquireIfLive() {
+				return cur, nil
+			}
+			// It exited between becoming ready and being claimed; start over.
+			continue
+		}
+
+		if cur != nil {
+			s.mu.Unlock()
+			// A process-level flag changed, or a different model was asked for.
+			// Reload rather than silently serving the request with the settings
+			// the previous process happened to have — but not while that
+			// process is still streaming a response, because killing it there
+			// truncates the answer with no error on either side.
+			if cur.busy() {
+				s.logf("%s is busy; waiting for it to finish before reloading", cur.rt.Model)
+			}
+			if err := cur.waitIdle(ctx); err != nil {
+				return nil, err
+			}
+			s.mu.Lock()
+			if s.cur == cur {
+				s.logf("reloading: %s", describeChange(cur.rt, rt))
+				cur.stop()
+				s.cur = nil
+			}
+			s.mu.Unlock()
+			continue
+		}
+
+		inst, err := s.start(rt)
+		if err != nil {
+			s.mu.Unlock()
 			return nil, err
 		}
-		return inst, nil
-	}
-
-	if s.cur != nil {
-		// A process-level flag changed. Reload rather than silently serving
-		// the request with the settings the previous process happened to have.
-		s.logf("reloading: %s", describeChange(s.cur.rt, rt))
-		s.cur.stop()
-		s.cur = nil
-	}
-
-	inst, err := s.start(rt)
-	if err != nil {
+		s.cur = inst
 		s.mu.Unlock()
-		return nil, err
-	}
-	s.cur = inst
-	s.mu.Unlock()
 
-	if err := inst.wait(ctx); err != nil {
-		s.mu.Lock()
-		if s.cur == inst {
-			s.cur.stop()
-			s.cur = nil
+		if err := inst.wait(ctx); err != nil {
+			s.mu.Lock()
+			if s.cur == inst {
+				s.cur.stop()
+				s.cur = nil
+			}
+			s.mu.Unlock()
+			return nil, err
 		}
-		s.mu.Unlock()
-		return nil, err
+		if inst.acquireIfLive() {
+			return inst, nil
+		}
+		return nil, fmt.Errorf("llama-server exited immediately after loading %s:\n%s",
+			rt.Model, inst.diagnosis())
 	}
-	return inst, nil
 }
 
 // Current returns the running instance, or nil.
@@ -146,6 +182,10 @@ func (s *Supervisor) start(rt config.Runtime) (*Instance, error) {
 		llama.Backend = rt.Backend
 	}
 
+	if rt.RPCServers != "" {
+		s.wakeRPCNodes(rt.RPCServers)
+	}
+
 	inst := &Instance{
 		rt:      rt,
 		port:    port,
@@ -155,6 +195,7 @@ func (s *Supervisor) start(rt config.Runtime) (*Instance, error) {
 		notable: newRing(40),
 		started: time.Now(),
 	}
+	inst.idle = sync.NewCond(&inst.mu)
 
 	args := Args(rt, port)
 	// exec.Command runs the binary directly — no shell, so there is no wrapper
@@ -168,10 +209,10 @@ func (s *Supervisor) start(rt config.Runtime) (*Instance, error) {
 	// Its own process group, so teardown can signal any grandchildren too.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, err
-	}
+	// A plain writer rather than StderrPipe: os/exec closes a pipe as soon as
+	// Wait returns, which races the reader and can swallow the very lines that
+	// explain a fast crash. With a writer, Wait waits for the copy to drain.
+	cmd.Stderr = &stderrWriter{inst: inst}
 	cmd.Stdout = nil
 
 	s.logf("starting %s on :%d (%s)", rt.Model, port, llama.BackendDir())
@@ -180,11 +221,40 @@ func (s *Supervisor) start(rt config.Runtime) (*Instance, error) {
 	}
 	inst.cmd = cmd
 
-	go inst.drain(stderr)
+	if rt.RPCServers != "" {
+		// The RPC node this depends on stays reachable only as long as this
+		// machine's network does, so a suspend here would silently stall every
+		// request the node is carrying.
+		inh, err := startInhibitor(rt.Model)
+		if err != nil {
+			s.logf("starting sleep inhibitor for %s: %v", rt.Model, err)
+		} else {
+			inst.inhibit = inh
+		}
+	}
+
 	go inst.reap()
 	go inst.probe(s.LoadTimeout, s.logf)
 
 	return inst, nil
+}
+
+// wakeRPCNodes sends a Wake-on-LAN magic packet to every endpoint in addrs (a
+// comma-joined rpc_servers list) that has a MAC configured. It does not wait
+// for a node to come up: llama-server's own connection failure already
+// explains a load that hits an endpoint still booting.
+func (s *Supervisor) wakeRPCNodes(addrs string) {
+	for _, addr := range strings.Split(addrs, ",") {
+		mac, ok := s.wol[addr]
+		if !ok {
+			continue
+		}
+		if err := wol.Wake(mac); err != nil {
+			s.logf("waking RPC node %s (%s): %v", addr, mac, err)
+			continue
+		}
+		s.logf("sent Wake-on-LAN to %s (%s)", addr, mac)
+	}
 }
 
 // freePort asks the kernel for an unused port. The gap between closing this
@@ -215,8 +285,39 @@ func describeChange(old, new config.Runtime) string {
 		diffs = append(diffs, fmt.Sprintf("spec %s n=%d -> %s n=%d",
 			old.SpecType, old.SpecDraftNMax, new.SpecType, new.SpecDraftNMax))
 	}
+	if old.NumCPUMoE != new.NumCPUMoE {
+		diffs = append(diffs, fmt.Sprintf("num_cpu_moe %d -> %d", old.NumCPUMoE, new.NumCPUMoE))
+	}
+	if old.OverrideTensor != new.OverrideTensor {
+		diffs = append(diffs, fmt.Sprintf("override_tensor %q -> %q",
+			old.OverrideTensor, new.OverrideTensor))
+	}
+	if old.RPCServers != new.RPCServers {
+		diffs = append(diffs, fmt.Sprintf("rpc_servers %q -> %q",
+			old.RPCServers, new.RPCServers))
+	}
+	if old.Device != new.Device || old.TensorSplit != new.TensorSplit ||
+		old.SplitMode != new.SplitMode || old.MainGPU != new.MainGPU ||
+		old.NoKVOffload != new.NoKVOffload {
+		diffs = append(diffs, fmt.Sprintf("placement device=%q split=%q mode=%q main_gpu=%d no_kv_offload=%t -> device=%q split=%q mode=%q main_gpu=%d no_kv_offload=%t",
+			old.Device, old.TensorSplit, old.SplitMode, old.MainGPU, old.NoKVOffload,
+			new.Device, new.TensorSplit, new.SplitMode, new.MainGPU, new.NoKVOffload))
+	}
+	if old.MoEExpertCache != new.MoEExpertCache ||
+		old.MoEExpertCacheInserts != new.MoEExpertCacheInserts {
+		diffs = append(diffs, fmt.Sprintf("moe_expert_cache %d/%d -> %d/%d",
+			old.MoEExpertCache, old.MoEExpertCacheInserts,
+			new.MoEExpertCache, new.MoEExpertCacheInserts))
+	}
+	if old.KVStreamArenaMiB != new.KVStreamArenaMiB {
+		diffs = append(diffs, fmt.Sprintf("kv_stream_arena %d MiB -> %d MiB",
+			old.KVStreamArenaMiB, new.KVStreamArenaMiB))
+	}
 	if old.ProjectorPath != new.ProjectorPath {
 		diffs = append(diffs, "projector changed")
+	}
+	if old.Embedding != new.Embedding {
+		diffs = append(diffs, fmt.Sprintf("embeddings %t -> %t", old.Embedding, new.Embedding))
 	}
 	if len(diffs) == 0 {
 		return fmt.Sprintf("%s, settings changed", new.Model)
