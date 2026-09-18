@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ollama/ollama/api"
@@ -28,25 +29,30 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body map[string]any
+	// RawMessage keeps untouched keys (messages, tools, embedding input, ...)
+	// as unparsed bytes: a multimodal or embedding body never gets recursively
+	// decoded and re-encoded just to patch five scalar fields.
+	var body map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return
 	}
-	name, _ := body["model"].(string)
+	name := rawString(body["model"])
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "model is required")
 		return
 	}
 
-	inst, profile, _, err := s.resolve(r.Context(), name, optionsFrom(body), keepAliveFrom(body))
+	inst, profile, _, err := s.resolve(r.Context(), name, optionsFrom(body), keepAliveFrom(body),
+		r.URL.Path == "/v1/embeddings")
 	if err != nil {
 		writeOpenAIResolveError(w, name, err)
 		return
 	}
+	defer inst.Release()
 
 	// llama-server knows the model by the alias it was started with.
-	body["model"] = inst.Runtime().Model
+	body["model"] = toRaw(inst.Runtime().Model)
 	applyProfileToOpenAI(body, profile)
 	delete(body, "keep_alive")
 
@@ -75,6 +81,11 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	for k, vs := range resp.Header {
+		// alpakka's own CORS headers are already set; llama-server's would be
+		// duplicated, and a duplicated Allow-Origin is rejected by browsers.
+		if strings.HasPrefix(strings.ToLower(k), "access-control-") {
+			continue
+		}
 		for _, v := range vs {
 			w.Header().Add(k, v)
 		}
@@ -108,16 +119,17 @@ func streamCopy(w http.ResponseWriter, r io.Reader) {
 
 // applyProfileToOpenAI fills in alpakka's defaults for anything the caller did
 // not set. An explicit value in the request always wins.
-func applyProfileToOpenAI(body map[string]any, p config.Profile) {
+func applyProfileToOpenAI(body map[string]json.RawMessage, p config.Profile) {
 	if p.ReasoningEffort != nil {
-		kwargs, _ := body["chat_template_kwargs"].(map[string]any)
+		var kwargs map[string]any
+		_ = json.Unmarshal(body["chat_template_kwargs"], &kwargs)
 		if kwargs == nil {
 			kwargs = map[string]any{}
 		}
 		if _, set := kwargs["reasoning_effort"]; !set {
 			kwargs["reasoning_effort"] = *p.ReasoningEffort
 		}
-		body["chat_template_kwargs"] = kwargs
+		body["chat_template_kwargs"] = toRaw(kwargs)
 	}
 	setIfAbsent(body, "temperature", p.Temperature)
 	setIfAbsent(body, "top_p", p.TopP)
@@ -126,35 +138,44 @@ func applyProfileToOpenAI(body map[string]any, p config.Profile) {
 	setIfAbsent(body, "seed", p.Seed)
 
 	// Ask for token counts on streams so clients that want usage get it.
-	if stream, _ := body["stream"].(bool); stream {
+	if rawBool(body["stream"]) {
 		if _, ok := body["stream_options"]; !ok {
-			body["stream_options"] = map[string]any{"include_usage": true}
+			body["stream_options"] = toRaw(map[string]any{"include_usage": true})
 		}
 	}
 }
 
-func setIfAbsent[T any](body map[string]any, key string, v *T) {
+func setIfAbsent[T any](body map[string]json.RawMessage, key string, v *T) {
 	if v == nil {
 		return
 	}
 	if _, ok := body[key]; ok {
 		return
 	}
-	body[key] = *v
+	body[key] = toRaw(*v)
 }
 
 // optionsFrom lets an OpenAI-style caller reach alpakka's process-level
 // settings through an "options" object, the same keys the ollama API uses.
-func optionsFrom(body map[string]any) map[string]any {
-	opts, _ := body["options"].(map[string]any)
-	if opts != nil {
-		delete(body, "options")
+func optionsFrom(body map[string]json.RawMessage) map[string]any {
+	raw, ok := body["options"]
+	if !ok {
+		return nil
 	}
+	var opts map[string]any
+	if err := json.Unmarshal(raw, &opts); err != nil || opts == nil {
+		return nil
+	}
+	delete(body, "options")
 	return opts
 }
 
-func keepAliveFrom(body map[string]any) *api.Duration {
-	switch v := body["keep_alive"].(type) {
+func keepAliveFrom(body map[string]json.RawMessage) *api.Duration {
+	var v any
+	if err := json.Unmarshal(body["keep_alive"], &v); err != nil {
+		return nil
+	}
+	switch v := v.(type) {
 	case string:
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -165,6 +186,28 @@ func keepAliveFrom(body map[string]any) *api.Duration {
 		return &api.Duration{Duration: time.Duration(v) * time.Second}
 	}
 	return nil
+}
+
+// rawString unmarshals a possibly-absent RawMessage as a string, treating
+// anything that isn't one as empty rather than an error.
+func rawString(v json.RawMessage) string {
+	var s string
+	_ = json.Unmarshal(v, &s)
+	return s
+}
+
+// rawBool unmarshals a possibly-absent RawMessage as a bool.
+func rawBool(v json.RawMessage) bool {
+	var b bool
+	_ = json.Unmarshal(v, &b)
+	return b
+}
+
+// toRaw marshals a value alpakka built itself. These are always plain
+// strings, numbers or maps of the same, which cannot fail to marshal.
+func toRaw(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
 }
 
 func writeOpenAIResolveError(w http.ResponseWriter, name string, err error) {

@@ -55,7 +55,7 @@ func run() error {
 		return fmt.Errorf("model store %s not readable: %w", *modelsRoot, err)
 	}
 
-	sup := supervisor.New(cfg.Llama, logger.Printf)
+	sup := supervisor.New(cfg.Llama, cfg.WoL, logger.Printf)
 	srv := &api.Server{
 		Store:  store.New(*modelsRoot),
 		Config: cfg,

@@ -20,6 +20,18 @@ import (
 // own tests against a real llama-server.
 func testServer(t *testing.T) http.Handler {
 	t.Helper()
+	h := bareServer(t)
+	models, err := store.New(store.DefaultRoot()).List()
+	if err != nil || len(models) == 0 {
+		t.Skip("ollama model store holds no models")
+	}
+	return h
+}
+
+// bareServer builds a server without requiring any model to be pulled, for the
+// endpoints whose behaviour does not depend on the store's contents.
+func bareServer(t *testing.T) http.Handler {
+	t.Helper()
 	root := store.DefaultRoot()
 	if _, err := os.Stat(root); err != nil {
 		t.Skip("ollama model store not present")
@@ -28,7 +40,7 @@ func testServer(t *testing.T) http.Handler {
 	s := &Server{
 		Store:  store.New(root),
 		Config: cfg,
-		Super:  supervisor.New(cfg.Llama, nil),
+		Super:  supervisor.New(cfg.Llama, cfg.WoL, nil),
 	}
 	return s.Handler()
 }
@@ -169,5 +181,69 @@ func TestFormatParametersMatchesOllamaLayout(t *testing.T) {
 		"stop                           \"<|im_end|>\""
 	if got != want {
 		t.Errorf("parameters =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// Without a preflight answer the mux replies 405 and a browser reports an
+// opaque CORS failure, which is every browser-based ollama client.
+func TestPreflightIsAnswered(t *testing.T) {
+	h := bareServer(t)
+	r := httptest.NewRequest(http.MethodOptions, "/api/chat", nil)
+	r.Header.Set("Origin", "http://localhost:3000")
+	r.Header.Set("Access-Control-Request-Method", "POST")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("preflight status = %d, want 204", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Errorf("Allow-Origin = %q", got)
+	}
+	if !strings.Contains(w.Header().Get("Access-Control-Allow-Methods"), "POST") {
+		t.Errorf("Allow-Methods = %q", w.Header().Get("Access-Control-Allow-Methods"))
+	}
+}
+
+func TestCORSAllowsLocalAndAppOriginsOnly(t *testing.T) {
+	s := &Server{Config: config.Default()}
+	allowed := []string{
+		"http://localhost:8080", "http://127.0.0.1:3000", "https://localhost",
+		"app://obsidian.md", "chrome-extension://abcdef", "vscode-webview://x",
+	}
+	for _, o := range allowed {
+		if !s.originAllowed(o) {
+			t.Errorf("%s should be allowed", o)
+		}
+	}
+	for _, o := range []string{"https://evil.example", "http://192.168.1.9", ""} {
+		if s.originAllowed(o) {
+			t.Errorf("%s should not be allowed", o)
+		}
+	}
+
+	// A configured list replaces the default entirely.
+	s.Config.Server.Origins = []string{"https://chat.example"}
+	if s.originAllowed("http://localhost:3000") {
+		t.Error("a configured list should not still allow localhost")
+	}
+	if !s.originAllowed("https://chat.example") {
+		t.Error("the configured origin was rejected")
+	}
+}
+
+// A normal response carries the headers too, not just the preflight.
+func TestCORSHeadersOnRealResponses(t *testing.T) {
+	h := bareServer(t)
+	r := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+	r.Header.Set("Origin", "http://localhost:3000")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Errorf("Allow-Origin = %q", got)
+	}
+	if !strings.Contains(w.Header().Get("Vary"), "Origin") {
+		t.Errorf("Vary = %q, want it to include Origin", w.Header().Get("Vary"))
 	}
 }

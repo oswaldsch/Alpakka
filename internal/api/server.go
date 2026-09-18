@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -59,13 +60,92 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/embeddings", s.handleOpenAI)
 	mux.HandleFunc("GET /v1/models", s.handleOpenAIModels)
 
+	// alpakka's own surface, deliberately outside both wire protocols so no
+	// ollama or OpenAI client can reach it by accident.
+	mux.HandleFunc("POST /alpakka/bench", s.handleBench)
+	mux.HandleFunc("GET /alpakka/status", s.handleBenchStatus)
+
 	// Writing to the model store is out of scope. Say so plainly rather than
 	// half-implementing it.
 	for _, p := range []string{"/api/pull", "/api/create", "/api/push", "/api/copy", "/api/delete"} {
 		mux.HandleFunc(p, s.handleUnsupported)
 	}
 
-	return s.logRequests(mux)
+	return s.logRequests(s.withCORS(mux))
+}
+
+// localHosts are the host names a browser page served from this machine can
+// carry in an Origin header.
+var localHosts = []string{"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+
+// appSchemes are the origins desktop and extension clients present. They are
+// not http(s), so there is no host to match on.
+var appSchemes = []string{"app", "file", "tauri", "vscode-webview",
+	"vscode-file", "moz-extension", "chrome-extension", "safari-web-extension"}
+
+// originAllowed reports whether a browser origin may call the API.
+//
+// With no configured list this mirrors ollama's default: any port on the
+// loopback interface, plus the schemes desktop clients use. A configured list
+// replaces that entirely, and "*" in it allows everything.
+func (s *Server) originAllowed(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	if configured := s.Config.Server.Origins; len(configured) > 0 {
+		for _, o := range configured {
+			if o == "*" || strings.EqualFold(o, origin) {
+				return true
+			}
+		}
+		return false
+	}
+
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	for _, scheme := range appSchemes {
+		if strings.EqualFold(u.Scheme, scheme) {
+			return true
+		}
+	}
+	host := u.Hostname()
+	for _, h := range localHosts {
+		if strings.EqualFold(host, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// withCORS answers preflights and marks allowed origins.
+//
+// Without this a browser client cannot reach alpakka at all: the mux answers an
+// OPTIONS preflight with 405, and the browser reports that as an opaque CORS
+// failure with nothing in the server log to explain it.
+func (s *Server) withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		// Set unconditionally: the response varies by origin whether or not
+		// this particular one was allowed.
+		h.Add("Vary", "Origin")
+
+		if origin := r.Header.Get("Origin"); s.originAllowed(origin) {
+			h.Set("Access-Control-Allow-Origin", origin)
+			h.Set("Access-Control-Allow-Credentials", "true")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, HEAD, OPTIONS")
+			h.Set("Access-Control-Allow-Headers",
+				"Content-Type, Authorization, Accept, User-Agent, X-Requested-With, X-Stainless-Lang")
+			h.Set("Access-Control-Max-Age", "86400")
+		}
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) logf(format string, args ...any) {
@@ -169,8 +249,10 @@ func (s *Server) handlePS(w http.ResponseWriter, r *http.Request) {
 			entry.Size = m.Size
 			entry.Details = m.Details()
 			// One model, fully on the GPU: that is the invariant the fit check
-			// enforces, so the resident size is the whole model.
-			entry.SizeVRAM = m.Size
+			// enforces, so the resident size is the whole model plus the KV
+			// cache llama.cpp reported allocating. Reporting the weights alone
+			// understates VRAM by the cache, which at 32k and q8_0 is GBs.
+			entry.SizeVRAM = m.Size + int64(inst.Fit().KVBufferMiB*1024*1024)
 		}
 		resp.Models = append(resp.Models, entry)
 	}
@@ -181,8 +263,17 @@ func (s *Server) handlePS(w http.ResponseWriter, r *http.Request) {
 //
 // It returns how long readiness took, which becomes load_duration. Requests
 // that arrive while a model is loading block here rather than failing.
-func (s *Server) resolve(ctx context.Context, name string, opts map[string]any, keepAlive *api.Duration) (
-	*supervisor.Instance, config.Profile, time.Duration, error) {
+//
+// The returned instance carries a reference: nothing will evict or reload it
+// until the caller calls Release, so every caller must defer that.
+//
+// forEmbedding says the request came in on an embedding endpoint. Ollama embeds
+// with any model, chat models included, so the endpoint decides this and not
+// only the model: llama-server needs --embeddings either way, and a chat model
+// asked to embed reloads into an embedding process the same way ollama starts a
+// separate runner for it.
+func (s *Server) resolve(ctx context.Context, name string, opts map[string]any, keepAlive *api.Duration,
+	forEmbedding bool) (*supervisor.Instance, config.Profile, time.Duration, error) {
 
 	m, err := s.Store.Get(name)
 	if err != nil {
@@ -195,7 +286,25 @@ func (s *Server) resolve(ctx context.Context, name string, opts map[string]any, 
 		return nil, profile, 0, errBadRequest{err}
 	}
 
-	rt := profile.Runtime(m.Name, m.ModelPath, m.ProjectorPath)
+	rt := profile.Runtime(m.Name, m.ModelPath, m.ProjectorPath, forEmbedding || m.IsEmbedding())
+	if rt.Embedding && rt.Pooling == "" && !m.DeclaresPooling() {
+		// A causal model has no pooling type, and llama.cpp's OpenAI endpoint
+		// rejects "none" rather than returning per-token vectors. Ollama embeds
+		// with any model, so pick the reduction decoder models are trained for
+		// rather than fail the request.
+		rt.Pooling = "last"
+	}
+	if rt.Embedding {
+		// An embedding model has no context to extend, so asking for more than
+		// it was trained on is not a performance choice but a load that
+		// --fit off refuses outright. The global num_ctx default is aimed at
+		// chat models and would fail every embedding load.
+		if trained := m.TrainedContext(); trained > 0 && rt.NumCtx > trained {
+			s.logf("%s: num_ctx %d exceeds the model's trained %d, using %d",
+				m.Name, rt.NumCtx, trained, trained)
+			rt.NumCtx = trained
+		}
+	}
 
 	s.loadMu.Lock()
 	defer s.loadMu.Unlock()

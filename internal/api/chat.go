@@ -27,11 +27,14 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, profile, load, err := s.resolve(r.Context(), req.Model, req.Options, req.KeepAlive)
+	inst, profile, load, err := s.resolve(r.Context(), req.Model, req.Options, req.KeepAlive, false)
 	if err != nil {
 		writeResolveError(w, req.Model, err)
 		return
 	}
+	// The instance is pinned until this returns, so neither the evictor nor a
+	// request for another model can kill the process mid-stream.
+	defer inst.Release()
 
 	stream := req.Stream == nil || *req.Stream
 	// llama-server is always asked to stream, even when the client wants a
@@ -82,11 +85,14 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, profile, load, err := s.resolve(r.Context(), req.Model, req.Options, req.KeepAlive)
+	inst, profile, load, err := s.resolve(r.Context(), req.Model, req.Options, req.KeepAlive, false)
 	if err != nil {
 		writeResolveError(w, req.Model, err)
 		return
 	}
+	// The instance is pinned until this returns, so neither the evictor nor a
+	// request for another model can kill the process mid-stream.
+	defer inst.Release()
 
 	// /api/generate is a single-turn chat. Sending it through the chat endpoint
 	// keeps the model's own template — and reasoning_effort — in play, which a
@@ -226,6 +232,20 @@ func (s *Server) post(r *http.Request, url string, body any) (*http.Response, er
 
 // relayUpstreamError forwards a llama-server error rather than inventing one.
 func relayUpstreamError(w http.ResponseWriter, resp *http.Response) {
+	e := upstreamError(resp)
+	writeError(w, e.status, e.Error())
+}
+
+// errUpstream carries a llama-server failure back through a call chain that
+// cannot write the response itself, keeping the status llama-server chose.
+type errUpstream struct {
+	status int
+	msg    string
+}
+
+func (e errUpstream) Error() string { return e.msg }
+
+func upstreamError(resp *http.Response) errUpstream {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 
 	var wrapped struct {
@@ -237,7 +257,7 @@ func relayUpstreamError(w http.ResponseWriter, resp *http.Response) {
 	if err := json.Unmarshal(body, &wrapped); err == nil && wrapped.Error.Message != "" {
 		msg = wrapped.Error.Message
 	}
-	writeError(w, resp.StatusCode, "llama-server: "+msg)
+	return errUpstream{status: resp.StatusCode, msg: "llama-server: " + msg}
 }
 
 func sortedKeys[V any](m map[string]V) []string {
@@ -351,10 +371,11 @@ func (s *Server) handleEmbed(w http.ResponseWriter, r *http.Request) {
 func (s *Server) embed(r *http.Request, model string, inputs []string,
 	opts map[string]any, keepAlive *api.Duration) ([][]float32, error) {
 
-	inst, _, _, err := s.resolve(r.Context(), model, opts, keepAlive)
+	inst, _, _, err := s.resolve(r.Context(), model, opts, keepAlive, true)
 	if err != nil {
 		return nil, err
 	}
+	defer inst.Release()
 
 	resp, err := s.post(r, inst.BaseURL()+"/v1/embeddings", map[string]any{
 		"model": inst.Runtime().Model,
