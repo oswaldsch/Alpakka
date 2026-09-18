@@ -51,10 +51,40 @@ OpenAI's, and makes `/v1/*` a near-passthrough.
 - `internal/store` — read-only view of `/var/lib/ollama/.ollama/models`.
 - `internal/config` — TOML profiles, and the request/process split.
 - `internal/supervisor` — the llama-server child: launch, fit check, eviction.
+- `internal/wol` — Wake-on-LAN magic packets for sleeping RPC nodes.
 - `internal/translate` — ollama ⇄ OpenAI, the only place wire shapes live.
 - `internal/api` — HTTP handlers, model routing, load queuing.
 
+## Install
+
+```bash
+./setup.sh
+```
+
+Builds alpakka, installs it into `~/.local/bin`, finds the llama.cpp build and
+the ollama model store on this machine, writes `~/.config/alpakka/config.toml`
+pointing at them, installs a systemd user unit and starts it — then waits for
+the API to answer before claiming success. Re-run it to pick up a new build.
+
+It needs a `llama-server` from llama.cpp, recent enough for `--fit` and
+`--spec-type`, and it checks for those flags before installing anything: a
+current ollama does not ship a llama-server at all (its runner lives inside the
+`ollama` binary), and distro packages tend to be a year behind.
+
+`--system` installs to `/usr/local/bin`, `/etc/alpakka` and
+`/etc/systemd/system` instead. `--dry-run` prints everything it would do,
+including the unit. Detection can be overridden with `--lib-dir`, `--backend`,
+`--models` and `--listen`; `--uninstall` removes it all again. `--help` lists
+the rest.
+
+The checks it makes are the ones whose absence is expensive: that the service
+user can actually read the model store, and that it can open `/dev/kfd` and
+`/dev/dri`. Failing either, llama-server still starts — on CPU, at a few tokens
+a second, silently.
+
 ## Running
+
+By hand, without the service:
 
 ```bash
 go build -o alpakka ./cmd/alpakka
@@ -77,6 +107,10 @@ OLLAMA_HOST=127.0.0.1:11435 ollama run qwen3.8-27b-q3-32k "..."
 ```toml
 [server]
 listen = "127.0.0.1:11435"
+# Browser origins allowed to call the API. Omitted, alpakka mirrors ollama's
+# default: any port on localhost, plus the app://, file://, tauri:// and
+# extension schemes desktop clients present. Setting this replaces that list.
+# origins = ["https://chat.example"]
 
 [llama]
 lib_dir = "/usr/local/lib/ollama"
@@ -101,20 +135,158 @@ These ride in ollama's existing `options` object. Ollama ignores keys it does
 not recognise, so a request carrying them stays valid against both servers.
 
 **Per request, no reload:** `reasoning_effort` (`low` / `medium` / `xhigh`),
-`temperature`, `top_k`, `top_p`, `min_p`, `repeat_penalty`, `seed`,
-`num_predict`, `stop`.
+`temperature`, `top_k`, `top_p`, `min_p`, `typical_p`, `repeat_penalty`,
+`repeat_last_n`, `presence_penalty`, `frequency_penalty`, `mirostat`,
+`mirostat_tau`, `mirostat_eta`, `seed`, `num_predict`, `num_keep`, `stop`.
 
 **Process level, triggers a clean reload:** `num_ctx`, `cache_type_k`,
 `cache_type_v`, `spec_type`, `spec_draft_n_max`, `spec_draft_n_min`, `num_gpu`,
-`flash_attn`, `backend`, `projector`.
+`allow_partial_offload`,
+`gpu_vram_cap_mib`,
+`flash_attn`, `backend`, `projector`, `embeddings`, `pooling`,
+`kv_stream_arena_mib`, `num_cpu_moe`, `override_tensor`, `moe_expert_cache`,
+`moe_expert_cache_inserts`, `rpc_servers`, `device`, `tensor_split`,
+`split_mode`, `main_gpu`, `no_kv_offload`.
 
 A request whose process-level options differ from the running process reloads
-it. That is logged and never silently deferred to the next cold start.
+it. That is logged and never silently deferred to the next cold start — but the
+reload waits for any response still streaming from the old process to finish
+first, because killing it there would truncate that answer with no error at
+either end. The same reference stops the keep-alive evictor: a generation that
+runs longer than `keep_alive` cannot have its own server unloaded underneath it,
+and `keep_alive: 0` unloads when the request completes rather than during it.
 
 `reasoning_effort` accepts only `low`, `medium` and `xhigh`. The Qwen3.8
 template rejects anything else and silently promotes `high` to `xhigh`, so
 alpakka rejects `high` outright rather than let it mean the opposite of what was
 asked. Ollama's own `think: "high"` is mapped to `xhigh` explicitly.
+
+`kv_stream_arena_mib` is llama-server's `--kv-stream-arena-mib`, out of tree at
+the time of writing: the KV cache lives in pinned host RAM and pages through a
+VRAM arena of that many MiB, so a context the card could not hold still runs.
+Zero or unset is the ordinary behaviour. Upstream streams one sequence only, so
+alpakka rejects it outright alongside a `parallel` other than 1 rather than
+letting the second request find out. An MTP draft cache is not streamed and
+shares no pool with the target context, so it still needs its own VRAM.
+`setup.sh` reports whether the build has the flag but does not require it.
+
+`num_cpu_moe` is `--n-cpu-moe`: the MoE expert weights of the first N layers
+stay on the CPU, which trades their bandwidth for the VRAM to hold everything
+else. `override_tensor` is `--override-tensor`, a list of `pattern=buffer`
+entries for placing named tensors by hand:
+
+```toml
+num_cpu_moe = 12
+override_tensor = ['blk\.[0-9]*[13579]\.ffn_.*_exps=CPU']
+```
+
+Entries are passed as one comma-separated flag. llama.cpp still accepts the flag
+repeated but warns that the form is deprecated, and the warning would show up in
+every load diagnosis.
+
+`rpc_servers` is `--rpc`: a list of `"host:port"` llama.cpp RPC backend
+endpoints, each one another device the automatic layer split can land on.
+Needs no `--split-mode`, since layer split across whatever devices are present
+is already llama.cpp's default. `rpc-server` has no auth or encryption, so
+every entry must be LAN-only.
+
+```toml
+rpc_servers = ["192.168.178.62:50052"]
+```
+
+`device`, `tensor_split`, `split_mode`, `main_gpu` and `no_kv_offload` are
+`--device`, `--tensor-split`, `--split-mode`, `--main-gpu` and
+`--no-kv-offload`, for choosing which local GPUs a model spans. `device` is a
+list or one comma-separated string of names from `llama-server --list-devices`;
+the order matters, and it also numbers the entries `tensor_split` and
+`main_gpu` refer to. `split_mode` is `none`, `layer`, `row` or `tensor`.
+llama.cpp cannot place the KV cache apart from the layers: each layer's cache
+lives on the GPU holding that layer, so `tensor_split` is how KV moves between
+cards, and `no_kv_offload` is the only way to put it in host RAM (at a large
+decode cost). Anything left unset passes nothing.
+
+```toml
+device = ["Vulkan1", "Vulkan0"]   # 9060 XT first, then the RX 570
+tensor_split = "12,6"
+```
+
+`gpu_vram_cap_mib` is a ceiling on the sum over all GPUs the process uses. The
+fit check counts layers over all devices, so a split load must still report
+`N/N`.
+
+Neither of the MoE options is the spill the fit check refuses. `offloaded N/M layers to
+GPU` is computed from `-ngl` against the layer count and does not see per-tensor
+placement, so a load steered by these still has to report `N/N`. What did land
+on the CPU is reported in the ready line.
+
+While any model is offloaded onto an RPC node, alpakka holds a `systemd-inhibit`
+sleep and idle lock for as long as the process runs: that node stays reachable
+only as long as this machine's own network does, and a suspend here would
+silently stall every request it is carrying. The lock is released the moment
+the process is torn down, on reload or eviction alike.
+
+`wol`, outside `[defaults]` and `[models.*]`, maps an RPC endpoint's
+`"host:port"` — the same string used in `rpc_servers` — to the MAC address of
+the machine behind it:
+
+```toml
+[wol]
+"192.168.178.62:50052" = "aa:bb:cc:dd:ee:ff"
+```
+
+A load that offloads onto a configured endpoint sends its MAC a Wake-on-LAN
+magic packet first, broadcast on the LAN alongside `rpc_servers` itself. An
+endpoint with no MAC configured here is assumed already running, exactly as
+before this existed. alpakka does not wait for the node to come up: a load that
+hits one still booting fails with llama-server's own connection error, the same
+as it always has.
+
+`moe_expert_cache` and `moe_expert_cache_inserts` are `--moe-expert-cache` and
+`--moe-expert-cache-inserts` from llama.cpp PR #27861, an unmerged draft: no
+released build has them, so this needs a llama-server built from that branch. It
+keeps a VRAM LRU of the experts `num_cpu_moe` or `override_tensor` put in host
+memory, and only on the decode path — prefill, batched decode and speculative
+validation take the ordinary route. Without experts on the host there is nothing
+to cache. Unset it passes nothing, because a build without the flags exits on
+the unknown argument rather than ignoring it; `setup.sh` reports whether they
+are there.
+
+## Measuring a setting
+
+`POST /alpakka/bench` runs a real generation and reports llama.cpp's own
+timings, so a setting can be tried without editing the config and restarting.
+It sits on alpakka's own prefix rather than `/api/*` or `/v1/*`, so no ollama or
+OpenAI client can reach it.
+
+```bash
+curl -s localhost:11435/alpakka/bench -d '{
+  "model": "qwen3.8-27b-q3-32k",
+  "options": {"spec_type": "draft-mtp", "spec_draft_n_max": 2, "num_predict": 300},
+  "prompt_tokens": 2048,
+  "runs": 3
+}'
+```
+
+`options` is the object `/api/chat` takes, so everything above is benchmarkable
+and a setting added there needs nothing here. Settings that differ from the
+running process reload it, which is the point; the reload's cost comes back as
+`load_ms` and `reloaded`, because a configuration that reloads on every request
+pays that every time.
+
+`prompt_tokens` synthesises a prompt of about that length — words drawn at
+random, so predictable filler cannot flatter a draft model, and a fresh one per
+run with `cache_prompt` off, so the second run's prefill is measured rather than
+served out of the first run's cache. `prompt` sends literal text instead. The
+budget is `options.num_predict`, default 128, and runs decode with `ignore_eos`
+so each produces the same count; `"ignore_eos": false` lets the model stop.
+
+Each run reports `prompt_*` for prefill and `predict_*` for decode, in tokens,
+ms and tokens/sec, taken from llama.cpp's counters rather than a wall-clock
+delta around the stream. `runs` above one adds an `aggregate` pooling them,
+which is worth having: the first run on a fresh process is always the slow one.
+`runtime` and `fit` report what actually ran and what landed where, so a result
+is self-describing. `GET /alpakka/status` reports those two for whatever is
+loaded, without touching it.
 
 ## Fitting is enforced
 
@@ -133,6 +305,19 @@ A partial CPU spill is never served. That is the ollama behaviour this exists to
 escape: it looks like a five-fold performance regression rather than a
 misconfiguration.
 
+The explicit exception is `allow_partial_offload = true`, which requires a
+finite `num_gpu` and permits only that profile to keep the remaining whole
+layers on the CPU. This is for a named oversized-model profile with a measured
+VRAM budget; defaults and every profile without the opt-in stay strict.
+`gpu_vram_cap_mib` measures the complete llama-server allocation from Linux DRM
+fdinfo after load and refuses to serve it if the cap is exceeded or unverifiable.
+Unlike `num_gpu`, this includes KV, graphs, vision, and allocator overhead.
+
+The check fails closed. If llama-server does not print the offload line at all —
+a reworded log message, a build that ignores `-lv` — the load is refused rather
+than passed, because a check that silently stops running is worse than no check:
+the symptom is exactly the slowdown it exists to catch.
+
 Requests that arrive while a model is loading block until it is ready rather
 than erroring. Eviction mirrors ollama: a five-minute default keep-alive,
 honouring the request's `keep_alive`.
@@ -141,7 +326,21 @@ honouring the request's `keep_alive`.
 
 Implemented: `/api/tags`, `/api/show`, `/api/ps`, `/api/version`, `/api/chat`,
 `/api/generate`, `/api/embed`, `/api/embeddings`, and the `/v1` OpenAI surface
-(`chat/completions`, `completions`, `embeddings`, `models`).
+(`chat/completions`, `completions`, `embeddings`, `models`). Plus alpakka's own
+`/alpakka/bench` and `/alpakka/status`, on neither wire protocol.
+
+Embeddings get their own llama-server. llama.cpp refuses `/v1/embeddings` unless
+the process was started with `--embeddings`, and refuses generation when it was,
+so there is no process that does both and switching between them reloads. Like
+ollama, any model can be embedded, not only a dedicated embedding model: the
+endpoint decides, not the model's capabilities.
+
+Two things follow, both handled. A causal model declares no pooling type, and
+llama.cpp's OpenAI endpoint rejects the resulting `none` rather than returning
+per-token vectors, so alpakka passes `--pooling last` — the reduction decoder
+models are trained for — unless the GGUF names its own or `pooling` is set. And
+`num_ctx` is capped at the context the model was trained for, since the chat
+default would fail every load under `--fit off`.
 
 Out of scope: `/api/pull`, `/api/create`, `/api/push`, `/api/copy`,
 `/api/delete` return 501 pointing at `ollama pull`. Also no auth, no multi-GPU,

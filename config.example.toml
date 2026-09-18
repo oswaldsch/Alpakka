@@ -24,3 +24,27 @@ reasoning_effort = "low"
 # The vision projector reserves ~1.16 GB whether or not it is used, which is
 # what pushed weights onto the CPU under ollama.
 projector = false
+# Named oversized-model profiles may deliberately leave whole layers on the
+# CPU. This opt-in requires num_gpu = 0..98; the default remains strict.
+# allow_partial_offload = true
+# gpu_vram_cap_mib = 12288 # fail closed if total child DRM VRAM exceeds this
+# Second inference node: the RTX 2070 Super in the Dell box, over plain LAN
+# Ethernet. rpc-server has no auth or encryption, so this only ever points at
+# LAN addresses.
+# rpc_servers = ["192.168.178.62:50052"]
+
+# Spread one model over several local GPUs. Names come from
+# `llama-server --list-devices`; llama.cpp keeps each layer's KV cache on the
+# GPU holding that layer, so tensor_split also decides where the KV lands.
+# device = ["Vulkan1", "Vulkan0"]
+# tensor_split = "12,6"
+# split_mode = "layer"   # none, layer, row or tensor
+# main_gpu = 0
+# no_kv_offload = true   # KV cache in host RAM, much slower decode
+
+# Wake-on-LAN for the RPC nodes above, keyed by the same "host:port" they're
+# named by in rpc_servers. A load that offloads onto an entry here sends its
+# MAC a magic packet first, so the Dell box does not need to stay powered on
+# just to be ready when a big model comes along.
+# [wol]
+# "192.168.178.62:50052" = "aa:bb:cc:dd:ee:ff"
