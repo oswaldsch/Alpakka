@@ -184,8 +184,9 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUnsupported(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotImplemented, fmt.Sprintf(
-		"alpakka does not implement %s: it serves models from ollama's store read-only. "+
-			"Use `ollama pull` to add a model, then request it here", r.URL.Path))
+		"alpakka does not implement %s: its model store is read-only over HTTP. "+
+			"Use `alpakka pull` or `ollama pull` to add a model, then request it here",
+		r.URL.Path))
 }
 
 func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {

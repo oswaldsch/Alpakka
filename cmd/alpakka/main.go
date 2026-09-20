@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,19 +22,38 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "alpakka:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(args []string) error {
+	// Bare flags keep starting the server, which is what every existing unit
+	// file and script invokes.
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return serve(args)
+	}
+	cmd, rest := args[0], args[1:]
+	switch cmd {
+	case "serve":
+		return serve(rest)
+	case "pull":
+		return pull(rest)
+	}
+	return fmt.Errorf("unknown command %q: expected serve or pull", cmd)
+}
+
+func serve(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	var (
-		configPath = flag.String("config", config.DefaultPath(), "path to config.toml")
-		listen     = flag.String("listen", "", "override the configured listen address")
-		modelsRoot = flag.String("models", "", "read this model root instead of the configured ones")
+		configPath = fs.String("config", config.DefaultPath(), "path to config.toml")
+		listen     = fs.String("listen", "", "override the configured listen address")
+		modelsRoot = fs.String("models", "", "read this model root instead of the configured ones")
 	)
-	flag.Parse()
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
