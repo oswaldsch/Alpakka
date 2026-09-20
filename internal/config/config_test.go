@@ -76,6 +76,9 @@ spec_draft_n_max = 2
 func TestRejectsBadReasoningEffort(t *testing.T) {
 	// "high" is the dangerous one: the template silently promotes it to xhigh,
 	// which is the slow path the caller was trying to avoid.
+	if _, err := Load(write(t, "[defaults]\nreasoning_effort = \"none\"\n")); err != nil {
+		t.Fatalf("reasoning_effort = none must be accepted: %v", err)
+	}
 	if _, err := Load(write(t, "[defaults]\nreasoning_effort = \"high\"\n")); err == nil {
 		t.Fatal("expected reasoning_effort = high to be rejected")
 	}

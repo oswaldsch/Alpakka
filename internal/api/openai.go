@@ -11,6 +11,7 @@ import (
 	"github.com/ollama/ollama/api"
 
 	"github.com/oswald/alpakka/internal/config"
+	"github.com/oswald/alpakka/internal/translate"
 )
 
 // handleOpenAI proxies the /v1 surface to llama-server, which already speaks
@@ -126,8 +127,10 @@ func applyProfileToOpenAI(body map[string]json.RawMessage, p config.Profile) {
 		if kwargs == nil {
 			kwargs = map[string]any{}
 		}
-		if _, set := kwargs["reasoning_effort"]; !set {
-			kwargs["reasoning_effort"] = *p.ReasoningEffort
+		_, hasEffort := kwargs["reasoning_effort"]
+		_, hasThinking := kwargs["enable_thinking"]
+		if !hasEffort && !hasThinking {
+			translate.SetReasoningEffort(kwargs, *p.ReasoningEffort)
 		}
 		body["chat_template_kwargs"] = toRaw(kwargs)
 	}

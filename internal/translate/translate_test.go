@@ -260,3 +260,24 @@ data: [DONE]
 		t.Errorf("CollectChat lost the tool calls: %+v", resp.Message)
 	}
 }
+
+func TestSetReasoningEffort(t *testing.T) {
+	for _, c := range []struct {
+		effort string
+		key    string
+		want   any
+	}{
+		{"none", "enable_thinking", false},
+		{"low", "reasoning_effort", "low"},
+		{"xhigh", "reasoning_effort", "xhigh"},
+	} {
+		kwargs := map[string]any{}
+		SetReasoningEffort(kwargs, c.effort)
+		if got, ok := kwargs[c.key]; !ok || got != c.want {
+			t.Errorf("effort %q: kwargs = %v, want %s=%v", c.effort, kwargs, c.key, c.want)
+		}
+		if len(kwargs) != 1 {
+			t.Errorf("effort %q: set %d keys, want 1", c.effort, len(kwargs))
+		}
+	}
+}

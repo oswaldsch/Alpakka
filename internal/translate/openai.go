@@ -222,7 +222,8 @@ func BuildRequest(model string, msgs []Message, p config.Profile, stream bool) *
 		r.MaxTokens = p.NumPredict
 	}
 	if p.ReasoningEffort != nil {
-		r.ChatTemplateKwargs = map[string]any{"reasoning_effort": *p.ReasoningEffort}
+		r.ChatTemplateKwargs = map[string]any{}
+		SetReasoningEffort(r.ChatTemplateKwargs, *p.ReasoningEffort)
 	}
 	if stream {
 		// Without this the final chunk carries no token counts, and ollama's
@@ -274,4 +275,18 @@ func contentWithImages(text string, images []api.ImageData) []map[string]any {
 // dataURL base64-encodes image bytes for an OpenAI image_url part.
 func dataURL(img api.ImageData) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(img)
+}
+
+// SetReasoningEffort puts a reasoning effort into a template's kwargs.
+//
+// "none" is the one value the template does not act on under that name: passing
+// reasoning_effort=none leaves thinking on, and Qwen3.5-9B then spends a whole
+// token budget reasoning without ever answering. enable_thinking=false is what
+// actually turns it off.
+func SetReasoningEffort(kwargs map[string]any, effort string) {
+	if effort == "none" {
+		kwargs["enable_thinking"] = false
+		return
+	}
+	kwargs["reasoning_effort"] = effort
 }

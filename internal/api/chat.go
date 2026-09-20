@@ -186,7 +186,7 @@ func applyThink(body *translate.Request, think *api.ThinkValue) {
 	if effort == "high" {
 		effort = "xhigh"
 	}
-	body.ChatTemplateKwargs["reasoning_effort"] = effort
+	translate.SetReasoningEffort(body.ChatTemplateKwargs, effort)
 }
 
 // applyFormat maps ollama's format field onto an OpenAI response_format.

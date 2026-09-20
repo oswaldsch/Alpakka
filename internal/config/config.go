@@ -381,10 +381,14 @@ var ValidSplitModes = []string{"none", "layer", "row", "tensor"}
 
 var reTensorSplit = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(,[0-9]+(\.[0-9]+)?)*$`)
 
-// ValidEfforts are the only values the Qwen3.8 template accepts. It rejects
-// anything else outright and silently promotes "high" to "xhigh", so alpakka
-// refuses the values that would not mean what the caller intended.
-var ValidEfforts = []string{"low", "medium", "xhigh"}
+// ValidEfforts are the values a Qwen chat template accepts. It rejects anything
+// else outright and silently promotes "high" to "xhigh", so alpakka refuses the
+// values that would not mean what the caller intended.
+//
+// "none" is what turns thinking off, and without it a thinking model is useless
+// as an assistant: Qwen3.5-9B answers a one-sentence question with 1600
+// characters of reasoning and no answer at all, even at "low".
+var ValidEfforts = []string{"none", "low", "medium", "xhigh"}
 
 // Validate checks the values alpakka can reject before a slow model load.
 func (c Config) Validate() error {
