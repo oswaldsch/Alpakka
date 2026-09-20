@@ -30,8 +30,10 @@ variable and no Modelfile parameter for either:
 - **`chat_template_kwargs`.** Dropping the template's reasoning effort from
   `xhigh` to `low` took one coding request from 62 s to 18 s.
 
-alpakka does not fork ollama. It reads ollama's model store read-only, supervises
-one `llama-server` process, and speaks ollama's wire API back out.
+alpakka does not fork ollama. It reads models off disk, supervises one
+`llama-server` process, and speaks ollama's wire API back out. Its own store is
+a directory of GGUF files; ollama's blob and manifest layout is still read, so
+the two coexist and nothing has to be moved.
 
 `llama-swap` was evaluated and rejected: it supervises llama-server well but is
 OpenAI-only, with no `/api/tags`, `/api/chat` or ollama NDJSON, and it does not
@@ -48,7 +50,8 @@ reduces the hard problem to one translator between ollama's chat shape and
 OpenAI's, and makes `/v1/*` a near-passthrough.
 
 - `internal/gguf` — GGUF metadata and tensor-shape reader.
-- `internal/store` — read-only view of `/var/lib/ollama/.ollama/models`.
+- `internal/store` — model sources: a GGUF directory and ollama's own layout.
+- `internal/hub` — pulling GGUFs from HuggingFace.
 - `internal/config` — TOML profiles, and the request/process split.
 - `internal/supervisor` — the llama-server child: launch, fit check, eviction.
 - `internal/wol` — Wake-on-LAN magic packets for sleeping RPC nodes.
@@ -99,6 +102,33 @@ OLLAMA_HOST=127.0.0.1:11435 ollama list
 OLLAMA_HOST=127.0.0.1:11435 ollama run qwen3.8-27b-q3-32k "..."
 ```
 
+## Models
+
+Models live at `<root>/<name>/<tag>.gguf`, with `<tag>.mmproj.gguf` beside them
+for vision and llama.cpp's `<tag>-00001-of-0000N.gguf` for a split model. The
+name is the directory, so `~/models/qwen3.8-27b/iq3-xxs.gguf` is
+`qwen3.8-27b:iq3-xxs`, and a bare `qwen3.8-27b` resolves when it is the only
+tag. Everything `/api/show` reports comes out of the GGUF header; system
+prompts and parameters come from `config.toml` rather than from the store.
+
+`alpakka pull` fetches a GGUF from HuggingFace into the first plain root:
+
+```bash
+alpakka pull https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/blob/main/Qwen3.8-27B-UD-IQ3_XXS.gguf
+alpakka pull hf.co/unsloth/Qwen3.8-27B-GGUF/UD-IQ3_XXS
+alpakka pull unsloth/Qwen3.8-27B-GGUF:UD-IQ3_XXS      # -> qwen3.8-27b:iq3-xxs
+```
+
+It resumes an interrupted download, fetches every part of a split model, offers
+the repo's projector when there is one, and refuses to replace an existing tag
+without `-f`. `HF_TOKEN` is used for gated repos.
+
+`alpakka import --from-ollama` gives ollama's existing blobs readable names by
+hardlinking them into the layout. It never copies, so it costs nothing and
+undoes with `rm`. It lists what it would do and needs `--apply` to act. The
+blobs are usually owned by the `ollama` user, and `fs.protected_hardlinks`
+stops anyone else linking them, so this wants `sudo`.
+
 ## Configuration
 
 `~/.config/alpakka/config.toml`. Config keys use the same names as the request
@@ -111,6 +141,13 @@ listen = "127.0.0.1:11435"
 # default: any port on localhost, plus the app://, file://, tauri:// and
 # extension schemes desktop clients present. Setting this replaces that list.
 # origins = ["https://chat.example"]
+
+[store]
+# Searched in order; the first root holding a name serves it, and a shadowed
+# copy is logged. A root with a manifests/ directory is read as an ollama
+# store, anything else as <root>/<name>/<tag>.gguf. Omitted, this is exactly
+# what alpakka uses. `alpakka pull` writes into the first plain directory.
+roots = ["~/models", "/var/lib/ollama/.ollama/models"]
 
 [llama]
 lib_dir = "/usr/local/lib/ollama"
@@ -343,8 +380,9 @@ models are trained for — unless the GGUF names its own or `pooling` is set. An
 default would fail every load under `--fit off`.
 
 Out of scope: `/api/pull`, `/api/create`, `/api/push`, `/api/copy`,
-`/api/delete` return 501 pointing at `ollama pull`. Also no auth, no multi-GPU,
-no concurrent models.
+`/api/delete` return 501 pointing at `alpakka pull`. Adding a model is a
+command-line act, not an HTTP one. Also no auth, no multi-GPU, no concurrent
+models.
 
 ## Known divergences from ollama
 

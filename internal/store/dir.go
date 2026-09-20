@@ -154,6 +154,9 @@ func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
 
 	out := map[string]tagFiles{}
 	splits := map[string][]string{}
+	loose := "" // a projector named for the repo rather than for one tag
+	var looseSize int64
+
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".gguf") {
 			continue
@@ -167,13 +170,35 @@ func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
 			out[tag] = f
 			continue
 		}
-		if tag, _, ok := splitPart(base); ok {
+
+		parsed := ParseGGUFName(e.Name())
+		if parsed.Projector {
+			// Publishers ship F32 beside F16; the larger is the better one and
+			// costs nothing at this size.
+			if info, err := e.Info(); err == nil && (loose == "" || info.Size() > looseSize) {
+				loose, looseSize = full, info.Size()
+			}
+			continue
+		}
+
+		stem := base
+		if parsed.Parts > 0 {
+			stem, _, _ = splitPart(base)
+		}
+		// A file still under its publisher's name is tagged by its quant, so a
+		// directory of downloads reads without having to be renamed first.
+		tag := stem
+		if _, taken := out[parsed.Tag]; parsed.Tag != "" && !taken {
+			tag = parsed.Tag
+		}
+
+		if parsed.Parts > 0 {
 			splits[tag] = append(splits[tag], full)
 			continue
 		}
-		f := out[base]
+		f := out[tag]
 		f.parts = []string{full}
-		out[base] = f
+		out[tag] = f
 	}
 
 	for tag, parts := range splits {
@@ -186,6 +211,11 @@ func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
 		// A projector with no weights beside it is not a model.
 		if len(f.parts) == 0 {
 			delete(out, tag)
+			continue
+		}
+		if f.projector == "" && loose != "" {
+			f.projector = loose
+			out[tag] = f
 		}
 	}
 	return out, nil
