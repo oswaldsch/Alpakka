@@ -172,6 +172,11 @@ func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
 		}
 
 		parsed := ParseGGUFName(e.Name())
+		if parsed.Draft {
+			// A draft model is not servable on its own; serving one answers
+			// with the draft's own output instead of the model's.
+			continue
+		}
 		if parsed.Projector {
 			// Publishers ship F32 beside F16; the larger is the better one and
 			// costs nothing at this size.

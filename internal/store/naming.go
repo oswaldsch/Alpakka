@@ -10,6 +10,7 @@ type GGUFName struct {
 	Name      string
 	Tag       string
 	Projector bool
+	Draft     bool
 	Part      int // split part number, zero when the file is not split
 	Parts     int
 }
@@ -29,6 +30,10 @@ func ParseGGUFName(filename string) GGUFName {
 	}
 	if strings.Contains(strings.ToLower(base), "mmproj") {
 		out.Projector = true
+		return out
+	}
+	if isDraftName(base) {
+		out.Draft = true
 		return out
 	}
 
@@ -55,6 +60,14 @@ func ParseGGUFName(filename string) GGUFName {
 	out.Name = slug(strings.Join(name, "-"))
 	out.Tag = slug(strings.Join(segs[quant:], "-"))
 	return out
+}
+
+// isDraftName spots a speculation draft shipped beside the model it drafts for.
+// Only "eagle" and "draft" qualify: "mtp" would match qwen3.5-9b-mtp, which is a
+// whole model whose MTP head happens to be built in.
+func isDraftName(base string) bool {
+	l := strings.ToLower(base)
+	return strings.Contains(l, "eagle") || strings.Contains(l, "draft")
 }
 
 // Slug is the lowercase, hyphenated form a name or tag is stored under.

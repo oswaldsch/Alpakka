@@ -8,6 +8,7 @@ func TestParseGGUFName(t *testing.T) {
 		name      string
 		tag       string
 		projector bool
+		draft     bool
 		part      int
 		parts     int
 	}{
@@ -17,6 +18,8 @@ func TestParseGGUFName(t *testing.T) {
 		{file: "Qwen3.5-9B-Q4_K_M.gguf", name: "qwen3.5-9b", tag: "q4-k-m"},
 		{file: "GLM-4.7-Flash-IQ4_XS.gguf", name: "glm-4.7-flash", tag: "iq4-xs"},
 		{file: "mmproj-BF16.gguf", projector: true},
+		{file: "eagle3-gpt-oss-20b-Q8_0.gguf", draft: true},
+		{file: "eagle3-q8-0.gguf", draft: true},
 
 		{file: "mmproj-F16.gguf", projector: true},
 		{file: "Qwen3-VL-8B-mmproj-F32.gguf", projector: true},
@@ -27,6 +30,9 @@ func TestParseGGUFName(t *testing.T) {
 		{file: "some-model.gguf", name: "some-model"},
 	} {
 		got := ParseGGUFName(c.file)
+		if got.Draft != c.draft {
+			t.Errorf("%s: Draft = %v, want %v", c.file, got.Draft, c.draft)
+		}
 		if got.Name != c.name || got.Tag != c.tag || got.Projector != c.projector ||
 			got.Part != c.part || got.Parts != c.parts {
 			t.Errorf("ParseGGUFName(%q) = %+v, want name=%q tag=%q projector=%v part=%d/%d",
