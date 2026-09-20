@@ -80,6 +80,17 @@ func (h *fakeHub) start(t *testing.T) *Client {
 	return c
 }
 
+// The slashes in owner/repo are part of the route, not data.
+func TestURLsKeepTheirSeparators(t *testing.T) {
+	c := NewClient(nil)
+	c.Endpoint = "https://huggingface.co"
+	got := c.FileURL("unsloth/Qwen3.8-27B-GGUF", "main", "UD-IQ3_XXS/model.gguf")
+	want := "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/main/UD-IQ3_XXS/model.gguf"
+	if got != want {
+		t.Errorf("FileURL = %q, want %q", got, want)
+	}
+}
+
 func TestResolvePicksTheQuant(t *testing.T) {
 	h := &fakeHub{files: map[string][]byte{
 		"Qwen3.8-27B-UD-IQ3_XXS.gguf": ggufFile(16),

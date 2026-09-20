@@ -64,7 +64,7 @@ func (e Entry) size() int64 {
 // Tree lists the GGUF files in a repo revision.
 func (c *Client) Tree(ctx context.Context, repo, revision string) ([]Entry, error) {
 	u := fmt.Sprintf("%s/api/models/%s/tree/%s?recursive=1",
-		c.Endpoint, url.PathEscape(repo), url.PathEscape(revision))
+		c.Endpoint, escapePath(repo), escapePath(revision))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -215,7 +215,19 @@ func modelName(repo, file string) string {
 
 // FileURL is where one repo file is downloaded from.
 func (c *Client) FileURL(repo, revision, path string) string {
-	return fmt.Sprintf("%s/%s/resolve/%s/%s", c.Endpoint, repo, revision, path)
+	return fmt.Sprintf("%s/%s/resolve/%s/%s",
+		c.Endpoint, escapePath(repo), escapePath(revision), escapePath(path))
+}
+
+// escapePath escapes each segment on its own. The separators are part of the
+// route, so escaping the whole thing turns owner/repo into one component and
+// the request 400s.
+func escapePath(p string) string {
+	parts := strings.Split(p, "/")
+	for i, s := range parts {
+		parts[i] = url.PathEscape(s)
+	}
+	return strings.Join(parts, "/")
 }
 
 func (c *Client) auth(req *http.Request) {

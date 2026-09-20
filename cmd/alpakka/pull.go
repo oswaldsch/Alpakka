@@ -111,9 +111,19 @@ func wantProjector(mode string, plan *hub.Plan, logger *log.Logger) (bool, error
 	return answer == "y" || answer == "yes", nil
 }
 
+// onTerminal reports whether there is someone to answer a question.
+//
+// A character device is not enough to go on: /dev/null is one, so a pull run
+// from a script or a unit would print a prompt nobody can see and then take
+// the answer from EOF.
 func onTerminal() bool {
 	info, err := os.Stdin.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	target, err := os.Readlink("/proc/self/fd/0")
+	return err == nil &&
+		(strings.HasPrefix(target, "/dev/pts/") || strings.HasPrefix(target, "/dev/tty"))
 }
 
 // writableRoot is the first root that is not an ollama store, which is where
