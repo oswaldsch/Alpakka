@@ -1,78 +1,21 @@
 {
- "devstral-small-2-32k:latest": {
-  "capabilities": [
-   "completion",
-   "tools",
-   "vision"
-  ],
-  "details": {
-   "families": [
-    "mistral3"
-   ],
-   "family": "mistral3",
-   "format": "gguf",
-   "parameter_size": "24.0B",
-   "parent_model": "devstral-small-2:latest",
-   "quantization_level": "Q4_K_M"
-  },
-  "parameters": "num_ctx                        32768\ntemperature                    0.15"
- },
- "devstral-small-2:latest": {
-  "capabilities": [
-   "completion",
-   "tools",
-   "vision"
-  ],
-  "details": {
-   "families": [
-    "mistral3"
-   ],
-   "family": "mistral3",
-   "format": "gguf",
-   "parameter_size": "24.0B",
-   "parent_model": "",
-   "quantization_level": "Q4_K_M"
-  },
-  "parameters": "temperature                    0.15"
- },
- "gemma4:26b": {
+ "glm-4.7-flash-iq4xs-128k:latest": {
   "capabilities": [
    "completion",
    "thinking",
-   "tools",
-   "vision"
+   "tools"
   ],
   "details": {
    "families": [
-    "gemma4"
+    "deepseek2"
    ],
-   "family": "gemma4",
+   "family": "deepseek2",
    "format": "gguf",
-   "parameter_size": "25.8B",
-   "parent_model": "",
-   "quantization_level": "Q4_K_M"
+   "parameter_size": "29.9B",
+   "parent_model": "hf.co/unsloth/GLM-4.7-Flash-GGUF:IQ4_XS",
+   "quantization_level": "IQ4_XS"
   },
-  "parameters": "top_k                          64\ntop_p                          0.95\ntemperature                    1"
- },
- "gemma4:e4b": {
-  "capabilities": [
-   "audio",
-   "completion",
-   "thinking",
-   "tools",
-   "vision"
-  ],
-  "details": {
-   "families": [
-    "gemma4"
-   ],
-   "family": "gemma4",
-   "format": "gguf",
-   "parameter_size": "8.0B",
-   "parent_model": "",
-   "quantization_level": "Q4_K_M"
-  },
-  "parameters": "temperature                    1\ntop_k                          64\ntop_p                          0.95"
+  "parameters": "num_ctx                        131072\nstop                           \"<|user|>\""
  },
  "gpt-oss:20b": {
   "capabilities": [
@@ -92,100 +35,7 @@
   },
   "parameters": "temperature                    1"
  },
- "gpt-oss:20b-16k": {
-  "capabilities": [
-   "completion",
-   "thinking",
-   "tools"
-  ],
-  "details": {
-   "families": [
-    "gptoss"
-   ],
-   "family": "gptoss",
-   "format": "gguf",
-   "parameter_size": "20.9B",
-   "parent_model": "gpt-oss:20b",
-   "quantization_level": "unknown"
-  },
-  "parameters": "num_ctx                        16384\ntemperature                    1"
- },
- "gpt-oss:20b-32k": {
-  "capabilities": [
-   "completion",
-   "thinking",
-   "tools"
-  ],
-  "details": {
-   "families": [
-    "gptoss"
-   ],
-   "family": "gptoss",
-   "format": "gguf",
-   "parameter_size": "20.9B",
-   "parent_model": "gpt-oss:20b",
-   "quantization_level": "unknown"
-  },
-  "parameters": "num_ctx                        32768\ntemperature                    1"
- },
- "hf.co/mradermacher/Holo2-8B-GGUF:Q5_K_M": {
-  "capabilities": [
-   "completion",
-   "thinking",
-   "tools",
-   "vision"
-  ],
-  "details": {
-   "families": [
-    "qwen3vl"
-   ],
-   "family": "qwen3vl",
-   "format": "gguf",
-   "parameter_size": "8.19B",
-   "parent_model": "",
-   "quantization_level": "Q5_K_M"
-  },
-  "parameters": "stop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \".Prompt }}<|im_end|>\""
- },
- "hf.co/unsloth/Qwen3.8-27B-GGUF:IQ4_XS": {
-  "capabilities": [
-   "completion",
-   "thinking",
-   "tools",
-   "vision"
-  ],
-  "details": {
-   "families": [
-    "qwen35"
-   ],
-   "family": "qwen35",
-   "format": "gguf",
-   "parameter_size": "27.3B",
-   "parent_model": "",
-   "quantization_level": "IQ4_XS"
-  },
-  "parameters": "stop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \"<|im_start|>user\""
- },
- "hf.co/unsloth/Qwen3.8-27B-GGUF:Q3_K_M": {
-  "capabilities": [
-   "completion",
-   "thinking",
-   "tools",
-   "vision"
-  ],
-  "details": {
-   "families": [
-    "qwen35"
-   ],
-   "family": "qwen35",
-   "format": "gguf",
-   "parameter_size": "27.3B",
-   "parent_model": "",
-   "quantization_level": "Q3_K_M"
-  },
-  "parameters": "stop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \"<|im_start|>user\""
- },
- "huihui_ai/gpt-oss-abliterated:20b": {
+ "gurubot/gpt-oss-derestricted:20b": {
   "capabilities": [
    "completion",
    "thinking",
@@ -198,12 +48,30 @@
    "family": "gpt-oss",
    "format": "gguf",
    "parameter_size": "20.9B",
-   "parent_model": "C:\\Users\\admin\\.ollama\\models\\blobs\\sha256-db7fa5d5c20375b944426278dea2e10a0c41da5ab429b705b4ea29041831cd69",
-   "quantization_level": "F16"
+   "parent_model": "hf.co/mradermacher/gpt-oss-20b-Derestricted-GGUF:Q4_K_M",
+   "quantization_level": "Q4_K_M"
   },
   "parameters": "temperature                    1"
  },
- "huihui_ai/qwen3.5-abliterated:9b": {
+ "hf.co/mradermacher/MAI-UI-8B-GGUF:Q6_K": {
+  "capabilities": [
+   "completion",
+   "tools",
+   "vision"
+  ],
+  "details": {
+   "families": [
+    "qwen3vl"
+   ],
+   "family": "qwen3vl",
+   "format": "gguf",
+   "parameter_size": "8.19B",
+   "parent_model": "",
+   "quantization_level": "Q6_K"
+  },
+  "parameters": "stop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<|im_start|>user\""
+ },
+ "hf.co/prithivMLmods/Holo-3.1-9B-GGUF:Q4_K_M": {
   "capabilities": [
    "completion",
    "thinking",
@@ -216,13 +84,13 @@
    ],
    "family": "qwen35",
    "format": "gguf",
-   "parameter_size": "9.7B",
+   "parameter_size": "8.95B",
    "parent_model": "",
    "quantization_level": "Q4_K_M"
   },
-  "parameters": "top_k                          20\ntop_p                          0.95\ntemperature                    1"
+  "parameters": ""
  },
- "prutser/gemma-4-26B-A4B-it-ara-abliterated:Q3_K_M": {
+ "hf.co/unsloth/GLM-4.7-Flash-GGUF:IQ4_XS": {
   "capabilities": [
    "completion",
    "thinking",
@@ -230,15 +98,91 @@
   ],
   "details": {
    "families": [
-    "gemma4"
+    "deepseek2"
    ],
-   "family": "gemma4",
+   "family": "deepseek2",
    "format": "gguf",
-   "parameter_size": "25.2B",
-   "parent_model": "/usr/share/ollama/.ollama/models/blobs/sha256-ee08104dba6fbbb01b13d5693bbac3303bba1e58d4f4257bf5dba5fa1cc42392",
-   "quantization_level": "Q3_K_M"
+   "parameter_size": "29.9B",
+   "parent_model": "",
+   "quantization_level": "IQ4_XS"
   },
-  "parameters": "stop                           \"<turn|>\""
+  "parameters": "stop                           \"<|user|>\""
+ },
+ "hf.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M": {
+  "capabilities": [
+   "completion",
+   "thinking",
+   "tools",
+   "vision"
+  ],
+  "details": {
+   "families": [
+    "qwen35moe"
+   ],
+   "family": "qwen35moe",
+   "format": "gguf",
+   "parameter_size": "35.5B",
+   "parent_model": "",
+   "quantization_level": "Q4_K_M"
+  },
+  "parameters": "stop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \".Prompt }}<|im_end|>\""
+ },
+ "hf.co/unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL": {
+  "capabilities": [
+   "completion",
+   "thinking",
+   "tools",
+   "vision"
+  ],
+  "details": {
+   "families": [
+    "qwen35"
+   ],
+   "family": "qwen35",
+   "format": "gguf",
+   "parameter_size": "27.3B",
+   "parent_model": "",
+   "quantization_level": "Q4_K_M"
+  },
+  "parameters": "stop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \"<|im_start|>user\""
+ },
+ "qwen3.5-mtp:35b": {
+  "capabilities": [
+   "completion",
+   "thinking",
+   "tools",
+   "vision"
+  ],
+  "details": {
+   "families": [
+    "qwen35moe"
+   ],
+   "family": "qwen35moe",
+   "format": "gguf",
+   "parameter_size": "35.5B",
+   "parent_model": "hf.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M",
+   "quantization_level": "Q4_K_M"
+  },
+  "parameters": "stop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \".Prompt }}<|im_end|>\""
+ },
+ "qwen3.5-mtp:9b": {
+  "capabilities": [
+   "completion",
+   "thinking",
+   "tools",
+   "vision"
+  ],
+  "details": {
+   "families": [
+    "qwen35"
+   ],
+   "family": "qwen35",
+   "format": "gguf",
+   "parameter_size": "9.2B",
+   "parent_model": "",
+   "quantization_level": "Q4_K_M"
+  },
+  "parameters": ""
  },
  "qwen3.5:9b": {
   "capabilities": [
@@ -278,12 +222,11 @@
   },
   "parameters": "min_p                          0\npresence_penalty               1.5\nrepeat_penalty                 1\ntemperature                    1\ntop_k                          20\ntop_p                          0.95"
  },
- "qwen3.8-27b-256k:latest": {
+ "qwen3.8-27b-q3-128k:latest": {
   "capabilities": [
    "completion",
    "thinking",
-   "tools",
-   "vision"
+   "tools"
   ],
   "details": {
    "families": [
@@ -292,55 +235,16 @@
    "family": "qwen35",
    "format": "gguf",
    "parameter_size": "27.3B",
-   "parent_model": "hf.co/unsloth/Qwen3.8-27B-GGUF:IQ4_XS",
-   "quantization_level": "IQ4_XS"
-  },
-  "parameters": "num_ctx                        262144\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \"<|im_start|>user\""
- },
- "qwen3.8-27b-nt-q3-32k:latest": {
-  "capabilities": [
-   "completion",
-   "thinking",
-   "tools",
-   "vision"
-  ],
-  "details": {
-   "families": [
-    "qwen35"
-   ],
-   "family": "qwen35",
-   "format": "gguf",
-   "parameter_size": "27.3B",
-   "parent_model": "hf.co/unsloth/Qwen3.8-27B-GGUF:Q3_K_M",
+   "parent_model": "qwen3.8-27b-q3-base:latest",
    "quantization_level": "Q3_K_M"
   },
-  "parameters": "num_ctx                        32768\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \"<|im_start|>user\""
- },
- "qwen3.8-27b-q3-16k:latest": {
-  "capabilities": [
-   "completion",
-   "thinking",
-   "tools",
-   "vision"
-  ],
-  "details": {
-   "families": [
-    "qwen35"
-   ],
-   "family": "qwen35",
-   "format": "gguf",
-   "parameter_size": "27.3B",
-   "parent_model": "hf.co/unsloth/Qwen3.8-27B-GGUF:Q3_K_M",
-   "quantization_level": "Q3_K_M"
-  },
-  "parameters": "stop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \"<|im_start|>user\"\nnum_ctx                        16384"
+  "parameters": "num_ctx                        131072\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \"<|im_start|>user\"\ntemperature                    0.3"
  },
  "qwen3.8-27b-q3-32k:latest": {
   "capabilities": [
    "completion",
    "thinking",
-   "tools",
-   "vision"
+   "tools"
   ],
   "details": {
    "families": [
@@ -349,7 +253,43 @@
    "family": "qwen35",
    "format": "gguf",
    "parameter_size": "27.3B",
-   "parent_model": "hf.co/unsloth/Qwen3.8-27B-GGUF:Q3_K_M",
+   "parent_model": "qwen3.8-27b-q3-base:latest",
+   "quantization_level": "Q3_K_M"
+  },
+  "parameters": "num_ctx                        32768\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \"<|im_start|>user\"\ntemperature                    0.3"
+ },
+ "qwen3.8-27b-q3-64k:latest": {
+  "capabilities": [
+   "completion",
+   "thinking",
+   "tools"
+  ],
+  "details": {
+   "families": [
+    "qwen35"
+   ],
+   "family": "qwen35",
+   "format": "gguf",
+   "parameter_size": "27.3B",
+   "parent_model": "qwen3.8-27b-q3-base:latest",
+   "quantization_level": "Q3_K_M"
+  },
+  "parameters": "num_ctx                        65536\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \"<|im_start|>user\"\ntemperature                    0.3"
+ },
+ "qwen3.8-27b-q3-base:latest": {
+  "capabilities": [
+   "completion",
+   "thinking",
+   "tools"
+  ],
+  "details": {
+   "families": [
+    "qwen35"
+   ],
+   "family": "qwen35",
+   "format": "gguf",
+   "parameter_size": "27.3B",
+   "parent_model": "qwen3.8-27b-q3-32k:latest",
    "quantization_level": "Q3_K_M"
   },
   "parameters": "num_ctx                        32768\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\nstop                           \"<think>\"\nstop                           \"<|im_start|>user\""
@@ -370,41 +310,6 @@
    "parent_model": "",
    "quantization_level": "Q4_K_M"
   },
-  "parameters": "repeat_penalty                 1\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\ntemperature                    0.6\ntop_k                          20\ntop_p                          0.95"
- },
- "richardyoung/olmocr2:7b-q8": {
-  "capabilities": [
-   "completion",
-   "vision"
-  ],
-  "details": {
-   "families": [
-    "qwen2vl",
-    "clip"
-   ],
-   "family": "qwen2vl",
-   "format": "gguf",
-   "parameter_size": "7.6B",
-   "parent_model": "/Users/ric/.ollama/models/blobs/sha256-299d0d6eadf5952ee8b9082b96a877451986996e19f84dfadf1fe01b849c4d82",
-   "quantization_level": "Q8_0"
-  },
-  "parameters": "stop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\"\ntemperature                    0.7\nnum_ctx                        4096"
- },
- "yasserrmd/Nanonets-OCR2-3B:latest": {
-  "capabilities": [
-   "completion",
-   "vision"
-  ],
-  "details": {
-   "families": [
-    "qwen2vl"
-   ],
-   "family": "qwen2vl",
-   "format": "gguf",
-   "parameter_size": "3.09B",
-   "parent_model": "",
-   "quantization_level": "Q8_0"
-  },
-  "parameters": "temperature                    0.0001"
+  "parameters": "temperature                    0.6\ntop_k                          20\ntop_p                          0.95\nrepeat_penalty                 1\nstop                           \"<|im_start|>\"\nstop                           \"<|im_end|>\""
  }
 }

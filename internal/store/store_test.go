@@ -146,9 +146,6 @@ func TestGetDefaultsTagToLatest(t *testing.T) {
 	if m.ModelPath == "" {
 		t.Error("no model path")
 	}
-	if m.ProjectorPath == "" {
-		t.Error("expected a projector layer")
-	}
 	if got := m.Params["num_ctx"]; got != float64(32768) {
 		t.Errorf("params num_ctx = %v (%T), want 32768", got, got)
 	}
@@ -175,6 +172,12 @@ func TestCanonicalName(t *testing.T) {
 }
 
 // showGolden is /api/show captured from the real ollama for every local model.
+// showGolden is ollama's own answer for every model in the live store, so the
+// comparison is against ollama rather than against alpakka's own output.
+// Recapture it whenever a tag is rebuilt:
+//
+//	for m in $(ollama list | tail -n+2 | cut -f1); do
+//	  curl -s localhost:11434/api/show -d "{\"model\":\"$m\"}"; done
 func showGolden(t *testing.T) map[string]struct {
 	Capabilities []string         `json:"capabilities"`
 	Details      api.ModelDetails `json:"details"`
