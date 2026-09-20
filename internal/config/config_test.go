@@ -383,6 +383,41 @@ func TestLoadAcceptsDeviceAsListOrString(t *testing.T) {
 	}
 }
 
+func TestStoreRootsExpandHome(t *testing.T) {
+	cfg, err := Load(write(t, `
+[store]
+roots = ["~/models", "/var/lib/ollama/.ollama/models"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	want := []string{filepath.Join(home, "models"), "/var/lib/ollama/.ollama/models"}
+	if len(cfg.Store.Roots) != len(want) {
+		t.Fatalf("roots = %v", cfg.Store.Roots)
+	}
+	for i := range want {
+		if cfg.Store.Roots[i] != want[i] {
+			t.Errorf("roots[%d] = %q, want %q", i, cfg.Store.Roots[i], want[i])
+		}
+	}
+}
+
+// No [store] section leaves the choice of roots to the caller rather than
+// meaning there are none.
+func TestStoreRootsDefaultToNothing(t *testing.T) {
+	cfg, err := Load(write(t, "[server]\nlisten = \":1\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Store.Roots) != 0 {
+		t.Errorf("roots = %v, want none", cfg.Store.Roots)
+	}
+}
+
 func TestRejectsBadPlacementValues(t *testing.T) {
 	for name, opts := range map[string]map[string]any{
 		"split_mode":   {"split_mode": "diagonal"},

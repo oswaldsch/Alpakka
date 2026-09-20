@@ -17,6 +17,7 @@ import (
 // Config is the whole of ~/.config/alpakka/config.toml.
 type Config struct {
 	Server Server `toml:"server"`
+	Store  Store  `toml:"store"`
 	Llama  Llama  `toml:"llama"`
 	// WoL maps an RPC endpoint's "host:port", as it appears in a profile's
 	// rpc_servers, to the MAC address of the machine behind it. A load that
@@ -36,6 +37,15 @@ type Server struct {
 	// desktop clients use. Browser clients cannot talk to alpakka at all
 	// without this, and the failure is a CORS error with no server-side trace.
 	Origins []string `toml:"origins"`
+}
+
+// Store is where models are read from. Roots are searched in order and the
+// first one holding a name serves it, so a root listed earlier shadows a copy
+// of the same model further down. A root with a manifests/ directory is read
+// as an ollama store, anything else as a directory of GGUF files. Leaving this
+// empty searches ~/models and then ollama's own root.
+type Store struct {
+	Roots []string `toml:"roots"`
 }
 
 // Llama locates the llama.cpp build to drive.
@@ -239,6 +249,9 @@ func Load(path string) (Config, error) {
 	if file.Llama.Backend != "" {
 		cfg.Llama.Backend = file.Llama.Backend
 	}
+	if len(file.Store.Roots) > 0 {
+		cfg.Store.Roots = expandRoots(file.Store.Roots)
+	}
 	cfg.Defaults = Merge(cfg.Defaults, file.Defaults)
 	for name, p := range file.Models {
 		cfg.Models[name] = p
@@ -251,6 +264,20 @@ func Load(path string) (Config, error) {
 		return cfg, fmt.Errorf("%s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+// expandRoots resolves a leading ~, which a config file is the natural place
+// to write and which no shell expands on alpakka's behalf.
+func expandRoots(roots []string) []string {
+	home, err := os.UserHomeDir()
+	out := make([]string, 0, len(roots))
+	for _, r := range roots {
+		if err == nil && (r == "~" || strings.HasPrefix(r, "~/")) {
+			r = filepath.Join(home, strings.TrimPrefix(r[1:], "/"))
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // ForModel returns the global defaults with the model's own overrides applied.

@@ -58,9 +58,7 @@ func (s *DirStore) List() ([]Model, error) {
 		}
 	}
 
-	sort.Slice(models, func(i, j int) bool {
-		return models[i].ModifiedAt.After(models[j].ModifiedAt)
-	})
+	sortNewestFirst(models)
 	return models, nil
 }
 
@@ -69,12 +67,12 @@ func (s *DirStore) Get(name string) (*Model, error) {
 	repo, want := splitName(name)
 	rel, ok := safeRel(repo)
 	if !ok {
-		return nil, fmt.Errorf("model %q not found", name)
+		return nil, fmt.Errorf("%q: %w", name, ErrNotFound)
 	}
 
 	tags, err := s.scanDir(filepath.Join(s.root, rel))
 	if err != nil || len(tags) == 0 {
-		return nil, fmt.Errorf("model %q not found", name)
+		return nil, fmt.Errorf("%q: %w", name, ErrNotFound)
 	}
 
 	if want == "" {
@@ -87,7 +85,7 @@ func (s *DirStore) Get(name string) (*Model, error) {
 	}
 	files, ok := tags[want]
 	if !ok {
-		return nil, fmt.Errorf("model %q not found", name)
+		return nil, fmt.Errorf("%q: %w", name, ErrNotFound)
 	}
 	return s.model(repo, want, files)
 }
@@ -316,6 +314,13 @@ func safeRel(name string) (string, bool) {
 
 func safeSegment(s string) bool {
 	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, `/\`)
+}
+
+// sortNewestFirst is the order /api/tags is expected in.
+func sortNewestFirst(models []Model) {
+	sort.Slice(models, func(i, j int) bool {
+		return models[i].ModifiedAt.After(models[j].ModifiedAt)
+	})
 }
 
 func sortedKeys[V any](m map[string]V) []string {

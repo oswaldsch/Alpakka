@@ -1,0 +1,142 @@
+package store
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestOpenPicksTheReaderFromTheLayout(t *testing.T) {
+	plain := t.TempDir()
+	if _, ok := Open(plain).(*DirStore); !ok {
+		t.Errorf("a plain directory should read as a DirStore")
+	}
+
+	ollama := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ollama, "manifests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := Open(ollama).(*Store); !ok {
+		t.Errorf("a root with manifests/ should read as an ollama Store")
+	}
+}
+
+func layered(t *testing.T) *Multi {
+	t.Helper()
+	first, second := t.TempDir(), t.TempDir()
+	kv := map[string]any{"general.architecture": "qwen35", "general.file_type": uint32(15)}
+
+	writeGGUF(t, filepath.Join(first, "shared", "q4-k-m.gguf"), kv)
+	writeGGUF(t, filepath.Join(first, "only-first", "q8-0.gguf"), kv)
+	writeGGUF(t, filepath.Join(second, "shared", "q4-k-m.gguf"), kv)
+	writeGGUF(t, filepath.Join(second, "only-second", "q8-0.gguf"), kv)
+
+	return NewMulti(nil, NewDir(first), NewDir(second))
+}
+
+func TestMultiFirstRootWins(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	kv := map[string]any{"general.architecture": "qwen35", "general.file_type": uint32(15)}
+	writeGGUF(t, filepath.Join(first, "shared", "q4-k-m.gguf"), kv)
+	writeGGUF(t, filepath.Join(second, "shared", "q4-k-m.gguf"), kv)
+
+	var shadowed int
+	m := NewMulti(func(string, ...any) { shadowed++ }, NewDir(first), NewDir(second))
+
+	models, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("List = %v, want one entry", names(models))
+	}
+	if !strings.HasPrefix(models[0].ModelPath, first) {
+		t.Errorf("ModelPath = %s, want it under %s", models[0].ModelPath, first)
+	}
+	if shadowed != 1 {
+		t.Errorf("logged %d shadowed models, want 1", shadowed)
+	}
+
+	got, err := m.Get("shared:q4-k-m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got.ModelPath, first) {
+		t.Errorf("Get returned %s", got.ModelPath)
+	}
+}
+
+// The same name is only logged once, or every /api/tags poll would repeat it.
+func TestMultiLogsAShadowedNameOnce(t *testing.T) {
+	m := layered(t)
+	var shadowed int
+	m.logf = func(string, ...any) { shadowed++ }
+	for range 3 {
+		if _, err := m.List(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if shadowed != 1 {
+		t.Errorf("logged %d times, want 1", shadowed)
+	}
+}
+
+func TestMultiListsEveryRoot(t *testing.T) {
+	m := layered(t)
+	models, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"only-first:q8-0", "only-second:q8-0", "shared:q4-k-m"}
+	if got := names(models); !equal(got, want) {
+		t.Errorf("List = %v, want %v", got, want)
+	}
+}
+
+func TestMultiGetFallsThroughToLaterRoots(t *testing.T) {
+	m := layered(t)
+	if _, err := m.Get("only-second:q8-0"); err != nil {
+		t.Errorf("Get(only-second) = %v", err)
+	}
+	_, err := m.Get("absent:q8-0")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("Get(absent) = %v, want ErrNotFound", err)
+	}
+}
+
+// An ambiguous bare name is an answer, not a miss: falling through to the next
+// root would serve a different model than the one the name pointed at.
+func TestMultiKeepsTheAmbiguousNameError(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	kv := map[string]any{"general.architecture": "qwen35", "general.file_type": uint32(15)}
+	writeGGUF(t, filepath.Join(first, "qwen", "q4-k-m.gguf"), kv)
+	writeGGUF(t, filepath.Join(first, "qwen", "q8-0.gguf"), kv)
+	writeGGUF(t, filepath.Join(second, "qwen", "iq3-xxs.gguf"), kv)
+
+	m := NewMulti(nil, NewDir(first), NewDir(second))
+	_, err := m.Get("qwen")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if errors.Is(err, ErrNotFound) || !strings.Contains(err.Error(), "q8-0") {
+		t.Errorf("error = %v, want the tags of the first root", err)
+	}
+}
+
+func TestMultiSurvivesAnUnreadableRoot(t *testing.T) {
+	good := t.TempDir()
+	writeGGUF(t, filepath.Join(good, "fine", "q8-0.gguf"), map[string]any{
+		"general.architecture": "qwen35",
+	})
+	m := NewMulti(nil, Open(filepath.Join(t.TempDir(), "gone")), NewDir(good))
+
+	models, err := m.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := names(models); !equal(got, []string{"fine:q8-0"}) {
+		t.Errorf("List = %v", got)
+	}
+}

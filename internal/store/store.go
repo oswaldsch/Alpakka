@@ -14,7 +14,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -168,9 +167,7 @@ func (s *Store) List() ([]Model, error) {
 		return nil, err
 	}
 
-	sort.Slice(models, func(i, j int) bool {
-		return models[i].ModifiedAt.After(models[j].ModifiedAt)
-	})
+	sortNewestFirst(models)
 	return models, nil
 }
 
@@ -205,7 +202,7 @@ func (s *Store) Get(name string) (*Model, error) {
 			return &models[i], nil
 		}
 	}
-	return nil, fmt.Errorf("model %q not found", name)
+	return nil, fmt.Errorf("%q: %w", name, ErrNotFound)
 }
 
 // manifestRel is canonicalName in reverse: it turns "qwen3:0.6b" back into

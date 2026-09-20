@@ -31,7 +31,7 @@ func run() error {
 	var (
 		configPath = flag.String("config", config.DefaultPath(), "path to config.toml")
 		listen     = flag.String("listen", "", "override the configured listen address")
-		modelsRoot = flag.String("models", store.DefaultRoot(), "ollama model store to read")
+		modelsRoot = flag.String("models", "", "read this model root instead of the configured ones")
 	)
 	flag.Parse()
 
@@ -51,13 +51,15 @@ func run() error {
 	if _, err := os.Stat(cfg.Llama.BackendDir()); err != nil {
 		return fmt.Errorf("backend directory %s not found: %w", cfg.Llama.BackendDir(), err)
 	}
-	if _, err := os.Stat(*modelsRoot); err != nil {
-		return fmt.Errorf("model store %s not readable: %w", *modelsRoot, err)
+
+	roots, err := openRoots(cfg, *modelsRoot, logger)
+	if err != nil {
+		return err
 	}
 
 	sup := supervisor.New(cfg.Llama, cfg.WoL, logger.Printf)
 	srv := &api.Server{
-		Store:  store.New(*modelsRoot),
+		Store:  store.NewMulti(logger.Printf, roots...),
 		Config: cfg,
 		Super:  sup,
 		Logger: logger,
@@ -80,7 +82,6 @@ func run() error {
 	go func() {
 		logger.Printf("alpakka listening on %s", cfg.Server.Listen)
 		logger.Printf("llama-server: %s (backend %s)", cfg.Llama.Binary(), cfg.Llama.Backend)
-		logger.Printf("model store:  %s", *modelsRoot)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errc <- err
 		}
@@ -101,4 +102,37 @@ func run() error {
 	// start fail for reasons that look nothing like the cause.
 	sup.Stop()
 	return nil
+}
+
+// openRoots resolves the roots to serve and reports which layout each is in.
+// A configured root that does not exist yet is skipped rather than fatal: a
+// machine may have ~/models before anything has been pulled into it, or the
+// other way round.
+func openRoots(cfg config.Config, override string, logger *log.Logger) ([]store.Source, error) {
+	roots := cfg.Store.Roots
+	if override != "" {
+		roots = []string{override}
+	}
+	if len(roots) == 0 {
+		roots = store.DefaultRoots()
+	}
+
+	var sources []store.Source
+	for _, root := range roots {
+		if _, err := os.Stat(root); err != nil {
+			logger.Printf("model root %s: skipped (%v)", root, err)
+			continue
+		}
+		src := store.Open(root)
+		kind := "gguf directory"
+		if _, ok := src.(*store.Store); ok {
+			kind = "ollama store"
+		}
+		logger.Printf("model root:   %s (%s)", root, kind)
+		sources = append(sources, src)
+	}
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("no readable model root among %v", roots)
+	}
+	return sources, nil
 }

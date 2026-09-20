@@ -3,6 +3,13 @@
 [server]
 listen = "127.0.0.1:11435"
 
+# Model roots, searched in order. A root with a manifests/ directory is read as
+# an ollama store, anything else as <root>/<name>/<tag>.gguf. The first root
+# holding a name serves it, and `alpakka pull` writes into the first plain
+# directory listed here. Omit the section for ~/models then ollama's own root.
+[store]
+roots = ["~/models", "/var/lib/ollama/.ollama/models"]
+
 [llama]
 lib_dir = "/usr/local/lib/ollama"
 backend = "rocm_v7_2"
