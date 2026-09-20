@@ -1,8 +1,8 @@
-// Package store reads ollama's on-disk model store.
+// Package store resolves models from disk.
 //
-// It is strictly read-only: alpakka resolves models that `ollama pull` has
-// already fetched and never writes to the store. That buys model management,
-// Modelfile templates and the existing library without reimplementing /api/pull.
+// A Source is a place models come from; this file implements the one that
+// reads ollama's blob and manifest layout. It is strictly read-only: alpakka
+// resolves models another tool has already fetched and never writes here.
 package store
 
 import (
@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ollama/ollama/api"
@@ -46,15 +45,13 @@ func DefaultRoot() string {
 
 // Store is a read-only view of an ollama model store.
 type Store struct {
-	root string
-
-	mu   sync.Mutex
-	gguf map[string]*gguf.File // keyed by model blob digest
+	root  string
+	cache *ggufCache
 }
 
 // New opens the store rooted at dir, which contains blobs/ and manifests/.
 func New(root string) *Store {
-	return &Store{root: root, gguf: map[string]*gguf.File{}}
+	return &Store{root: root, cache: newGGUFCache()}
 }
 
 // Root returns the store's root directory.
@@ -104,7 +101,7 @@ type Model struct {
 	License       string
 	Params        map[string]any
 
-	store *Store
+	cache *ggufCache
 }
 
 // blobPath maps a "sha256:abc" digest to its file in blobs/.
@@ -273,7 +270,7 @@ func (s *Store) load(manifestPath, name string) (*Model, error) {
 		ModifiedAt: info.ModTime(),
 		Config:     cfg,
 		Params:     map[string]any{},
-		store:      s,
+		cache:      s.cache,
 	}
 
 	for _, l := range mf.Layers {
@@ -321,22 +318,10 @@ func (s *Store) readBlob(digest string) (string, error) {
 
 // GGUF parses and caches the model's GGUF metadata header.
 func (m *Model) GGUF() (*gguf.File, error) {
-	s := m.store
-	s.mu.Lock()
-	if f, ok := s.gguf[m.ModelPath]; ok {
-		s.mu.Unlock()
-		return f, nil
+	if m.cache == nil {
+		return gguf.Open(m.ModelPath)
 	}
-	s.mu.Unlock()
-
-	f, err := gguf.Open(m.ModelPath)
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	s.gguf[m.ModelPath] = f
-	s.mu.Unlock()
-	return f, nil
+	return m.cache.open(m.ModelPath)
 }
 
 // Details renders the details object ollama reports in /api/tags, /api/show and

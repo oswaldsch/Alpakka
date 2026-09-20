@@ -26,7 +26,7 @@ const Version = "0.32.0"
 
 // Server wires the store, the config and the supervisor into ollama's API.
 type Server struct {
-	Store  *store.Store
+	Store  store.Source
 	Config config.Config
 	Super  *supervisor.Supervisor
 	Logger *log.Logger
