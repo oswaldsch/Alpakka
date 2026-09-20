@@ -85,23 +85,27 @@ type Layer struct {
 	From      string `json:"from,omitempty"`
 }
 
-// Model is a model resolved from the store.
+// Model is a model resolved from a Source.
 type Model struct {
 	Name        string // canonical "name:tag", as ollama reports it
-	Digest      string // sha256 of the manifest file, matching /api/tags
-	Size        int64  // config plus every layer
+	Digest      string // stable id, matching /api/tags
+	Size        int64  // every file the model is made of
 	ModifiedAt  time.Time
 	ParentModel string
 
-	ModelPath     string // blob holding the GGUF weights
-	ProjectorPath string // vision projector blob, empty when the model has none
+	ModelPath     string // file holding the GGUF weights
+	ProjectorPath string // vision projector, empty when the model has none
 	Config        Config
-	Template      string // ollama's own template layer
+	Template      string
 	System        string
 	License       string
 	Params        map[string]any
 
-	cache *ggufCache
+	// goTemplate says Template came from ollama's template layer rather than
+	// the jinja one in the GGUF, which decides whether the Go template
+	// variables are worth sniffing for capabilities.
+	goTemplate bool
+	cache      *ggufCache
 }
 
 // blobPath maps a "sha256:abc" digest to its file in blobs/.
@@ -285,6 +289,7 @@ func (s *Store) load(manifestPath, name string) (*Model, error) {
 			m.ProjectorPath = s.blobPath(l.Digest)
 		case MediaTemplate:
 			m.Template, _ = s.readBlob(l.Digest)
+			m.goTemplate = m.Template != ""
 		case MediaSystem:
 			m.System, _ = s.readBlob(l.Digest)
 		case MediaLicense:
@@ -404,7 +409,7 @@ func (m *Model) Capabilities() []model.Capability {
 		add(model.CapabilityVision)
 	}
 
-	if m.Template != "" {
+	if m.goTemplate {
 		// Go templates expose these as template variables.
 		if strings.Contains(m.Template, "Tools") {
 			add(model.CapabilityTools)
@@ -456,7 +461,7 @@ func parserCapabilities(name string) (tools, thinking, known bool) {
 // usesOllamaRenderedChat reports whether ollama would render the chat itself
 // rather than handing the messages to the model's own jinja template.
 func (m *Model) usesOllamaRenderedChat() bool {
-	return m.Config.Renderer != "" || m.Config.Parser != "" || m.Template != ""
+	return m.Config.Renderer != "" || m.Config.Parser != "" || m.goTemplate
 }
 
 func chatTemplateHasTools(tmpl string) bool {
