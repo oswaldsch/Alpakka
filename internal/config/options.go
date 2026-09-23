@@ -21,6 +21,16 @@ func Apply(p Profile, opts map[string]any) (Profile, error) {
 			err = setStr(&out.CacheTypeK, k, v)
 		case "cache_type_v":
 			err = setStr(&out.CacheTypeV, k, v)
+		case "cache_type_k_draft":
+			err = setStr(&out.CacheTypeKDraft, k, v)
+		case "cache_type_v_draft":
+			err = setStr(&out.CacheTypeVDraft, k, v)
+		case "num_batch":
+			err = setInt(&out.NumBatch, k, v)
+		case "num_ubatch":
+			err = setInt(&out.NumUBatch, k, v)
+		case "load_mode":
+			err = setStr(&out.LoadMode, k, v)
 		case "spec_type":
 			err = setStr(&out.SpecType, k, v)
 		case "spec_draft_n_max":

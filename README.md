@@ -177,7 +177,8 @@ not recognise, so a request carrying them stays valid against both servers.
 `mirostat_tau`, `mirostat_eta`, `seed`, `num_predict`, `num_keep`, `stop`.
 
 **Process level, triggers a clean reload:** `num_ctx`, `cache_type_k`,
-`cache_type_v`, `spec_type`, `spec_draft_n_max`, `spec_draft_n_min`, `num_gpu`,
+`cache_type_v`, `cache_type_k_draft`, `cache_type_v_draft`, `num_batch`,
+`num_ubatch`, `load_mode`, `spec_type`, `spec_draft_n_max`, `spec_draft_n_min`, `num_gpu`,
 `allow_partial_offload`,
 `gpu_vram_cap_mib`,
 `flash_attn`, `backend`, `projector`, `embeddings`, `pooling`,
@@ -206,6 +207,14 @@ alpakka rejects it outright alongside a `parallel` other than 1 rather than
 letting the second request find out. An MTP draft cache is not streamed and
 shares no pool with the target context, so it still needs its own VRAM.
 `setup.sh` reports whether the build has the flag but does not require it.
+
+`cache_type_k_draft` / `cache_type_v_draft` set the MTP draft context's KV
+type, which llama.cpp otherwise leaves at f16: 512 MiB at 128K on
+Qwen3.8-27B. `num_batch` and `num_ubatch` are `-b` / `-ub`. A smaller ubatch
+shrinks the compute buffers (27B: 256 frees ~450 MiB at no prefill cost), a
+larger one speeds up MoE prefill (35B-A3B: 2048 is 2.4x with `load_mode =
+"none"`). `load_mode` is `--load-mode`: `auto`, `none`, `mmap`, `mlock`,
+`mmap+mlock` or `dio`.
 
 `num_cpu_moe` is `--n-cpu-moe`: the MoE expert weights of the first N layers
 stay on the CPU, which trades their bandwidth for the VRAM to hold everything

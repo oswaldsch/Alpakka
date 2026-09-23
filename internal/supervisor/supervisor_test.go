@@ -508,3 +508,33 @@ func TestAcquireIfModelReusesOnlyTheSameModel(t *testing.T) {
 		t.Error("a chat instance was reused for embedding")
 	}
 }
+
+func TestArgsCarriesBatchDraftCacheAndLoadModeOnlyWhenSet(t *testing.T) {
+	rt := config.Profile{
+		CacheTypeKDraft: strptr("q4_0"),
+		CacheTypeVDraft: strptr("q4_0"),
+		NumBatch:        intptr(2048),
+		NumUBatch:       intptr(256),
+		LoadMode:        strptr("none"),
+	}.Runtime("m", "/blob", "", false)
+	got := strings.Join(Args(rt, 1), " ")
+	for _, want := range []string{
+		"--cache-type-k-draft q4_0", "--cache-type-v-draft q4_0",
+		"--batch-size 2048", "--ubatch-size 256", "--load-mode none",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args missing %q: %s", want, got)
+		}
+	}
+	bare := config.Profile{}.Runtime("m", "/blob", "", false)
+	for _, flag := range []string{"-draft", "--batch-size", "--ubatch-size", "--load-mode"} {
+		if s := strings.Join(Args(bare, 1), " "); strings.Contains(s, flag) {
+			t.Errorf("%s passed when unset: %s", flag, s)
+		}
+	}
+	for _, want := range []string{"draft cache", "batch", "load_mode"} {
+		if d := describeChange(bare, rt); !strings.Contains(d, want) {
+			t.Errorf("reload reason does not mention %s: %s", want, d)
+		}
+	}
+}

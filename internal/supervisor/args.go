@@ -50,6 +50,22 @@ func Args(rt config.Runtime, port int) []string {
 		args = append(args, "--cache-type-v", rt.CacheTypeV)
 	}
 
+	if rt.CacheTypeKDraft != "" {
+		args = append(args, "--cache-type-k-draft", rt.CacheTypeKDraft)
+	}
+	if rt.CacheTypeVDraft != "" {
+		args = append(args, "--cache-type-v-draft", rt.CacheTypeVDraft)
+	}
+	if rt.NumBatch > 0 {
+		args = append(args, "--batch-size", strconv.Itoa(rt.NumBatch))
+	}
+	if rt.NumUBatch > 0 {
+		args = append(args, "--ubatch-size", strconv.Itoa(rt.NumUBatch))
+	}
+	if rt.LoadMode != "" {
+		args = append(args, "--load-mode", rt.LoadMode)
+	}
+
 	// Deliberate CPU placement, not the spill --fit off prevents.
 	if rt.NumCPUMoE > 0 {
 		args = append(args, "--n-cpu-moe", strconv.Itoa(rt.NumCPUMoE))

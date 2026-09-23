@@ -411,3 +411,46 @@ func TestRejectsBadPlacementValues(t *testing.T) {
 		}
 	}
 }
+
+func TestBatchDraftCacheAndLoadModeAreProcessLevel(t *testing.T) {
+	p, err := Apply(Profile{}, map[string]any{
+		"cache_type_k_draft": "q4_0",
+		"cache_type_v_draft": "q4_0",
+		"num_batch":          2048.0,
+		"num_ubatch":         256.0,
+		"load_mode":          "none",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := Merge(Profile{NumUBatch: ptr(512)}, p).Runtime("m", "/blob", "", false)
+	if rt.CacheTypeKDraft != "q4_0" || rt.CacheTypeVDraft != "q4_0" {
+		t.Errorf("draft cache = %s/%s, want q4_0/q4_0", rt.CacheTypeKDraft, rt.CacheTypeVDraft)
+	}
+	if rt.NumBatch != 2048 || rt.NumUBatch != 256 {
+		t.Errorf("batch = %d/%d, want 2048/256", rt.NumBatch, rt.NumUBatch)
+	}
+	if rt.LoadMode != "none" {
+		t.Errorf("load_mode = %q, want none", rt.LoadMode)
+	}
+
+	base := Profile{}.Runtime("m", "/blob", "", false)
+	if base.CacheTypeKDraft != "" || base.NumBatch != 0 || base.NumUBatch != 0 || base.LoadMode != "" {
+		t.Errorf("unset options resolved to %+v, want llama.cpp defaults", base)
+	}
+	if base == rt {
+		t.Error("changed batch, draft cache or load mode must force a reload")
+	}
+}
+
+func TestRejectsBadBatchAndLoadMode(t *testing.T) {
+	for name, opts := range map[string]map[string]any{
+		"load_mode":  {"load_mode": "mmap-ish"},
+		"num_batch":  {"num_batch": 0.0},
+		"num_ubatch": {"num_ubatch": -1.0},
+	} {
+		if _, err := Apply(Profile{}, opts); err == nil {
+			t.Errorf("%s: accepted %v", name, opts)
+		}
+	}
+}

@@ -258,6 +258,17 @@ func describeChange(old, new config.Runtime) string {
 		diffs = append(diffs, fmt.Sprintf("cache %s/%s -> %s/%s",
 			old.CacheTypeK, old.CacheTypeV, new.CacheTypeK, new.CacheTypeV))
 	}
+	if old.CacheTypeKDraft != new.CacheTypeKDraft || old.CacheTypeVDraft != new.CacheTypeVDraft {
+		diffs = append(diffs, fmt.Sprintf("draft cache %s/%s -> %s/%s",
+			old.CacheTypeKDraft, old.CacheTypeVDraft, new.CacheTypeKDraft, new.CacheTypeVDraft))
+	}
+	if old.NumBatch != new.NumBatch || old.NumUBatch != new.NumUBatch {
+		diffs = append(diffs, fmt.Sprintf("batch %d/%d -> %d/%d",
+			old.NumBatch, old.NumUBatch, new.NumBatch, new.NumUBatch))
+	}
+	if old.LoadMode != new.LoadMode {
+		diffs = append(diffs, fmt.Sprintf("load_mode %q -> %q", old.LoadMode, new.LoadMode))
+	}
 	if old.SpecType != new.SpecType || old.SpecDraftNMax != new.SpecDraftNMax {
 		diffs = append(diffs, fmt.Sprintf("spec %s n=%d -> %s n=%d",
 			old.SpecType, old.SpecDraftNMax, new.SpecType, new.SpecDraftNMax))

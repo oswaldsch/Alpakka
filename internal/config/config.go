@@ -84,13 +84,19 @@ func splitList(s string) []string {
 // options layer over model defaults over global defaults.
 type Profile struct {
 	// Process-level: a change requires a llama-server restart.
-	NumCtx        *int    `toml:"num_ctx"`
-	CacheTypeK    *string `toml:"cache_type_k"`
-	CacheTypeV    *string `toml:"cache_type_v"`
-	SpecType      *string `toml:"spec_type"`
-	SpecDraftNMax *int    `toml:"spec_draft_n_max"`
-	SpecDraftNMin *int    `toml:"spec_draft_n_min"`
-	NumGPU        *int    `toml:"num_gpu"`
+	NumCtx     *int    `toml:"num_ctx"`
+	CacheTypeK *string `toml:"cache_type_k"`
+	CacheTypeV *string `toml:"cache_type_v"`
+	// llama.cpp gives the MTP draft context an f16 cache by default, 512 MiB at 128K.
+	CacheTypeKDraft *string `toml:"cache_type_k_draft"`
+	CacheTypeVDraft *string `toml:"cache_type_v_draft"`
+	NumBatch        *int    `toml:"num_batch"`
+	NumUBatch       *int    `toml:"num_ubatch"`
+	LoadMode        *string `toml:"load_mode"`
+	SpecType        *string `toml:"spec_type"`
+	SpecDraftNMax   *int    `toml:"spec_draft_n_max"`
+	SpecDraftNMin   *int    `toml:"spec_draft_n_min"`
+	NumGPU          *int    `toml:"num_gpu"`
 	// Lets a bounded -ngl profile leave layers on the CPU. Unset keeps the strict fit check.
 	AllowPartialOffload *bool `toml:"allow_partial_offload"`
 	// Fail-closed ceiling measured from the child's DRM fdinfo, including caches and graphs.
@@ -266,6 +272,11 @@ func Merge(base, over Profile) Profile {
 	setIf(&out.NumCtx, over.NumCtx)
 	setIf(&out.CacheTypeK, over.CacheTypeK)
 	setIf(&out.CacheTypeV, over.CacheTypeV)
+	setIf(&out.CacheTypeKDraft, over.CacheTypeKDraft)
+	setIf(&out.CacheTypeVDraft, over.CacheTypeVDraft)
+	setIf(&out.NumBatch, over.NumBatch)
+	setIf(&out.NumUBatch, over.NumUBatch)
+	setIf(&out.LoadMode, over.LoadMode)
 	setIf(&out.SpecType, over.SpecType)
 	setIf(&out.SpecDraftNMax, over.SpecDraftNMax)
 	setIf(&out.SpecDraftNMin, over.SpecDraftNMin)
@@ -328,6 +339,8 @@ func ptr[T any](v T) *T { return &v }
 
 var ValidPoolings = []string{"none", "mean", "cls", "last", "rank"}
 
+var ValidLoadModes = []string{"auto", "none", "mmap", "mlock", "mmap+mlock", "dio"}
+
 var ValidSplitModes = []string{"none", "layer", "row", "tensor"}
 
 var reTensorSplit = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(,[0-9]+(\.[0-9]+)?)*$`)
@@ -369,6 +382,15 @@ func (p Profile) Validate() error {
 	}
 	if p.NumCtx != nil && *p.NumCtx <= 0 {
 		return fmt.Errorf("num_ctx must be positive, got %d", *p.NumCtx)
+	}
+	if p.NumBatch != nil && *p.NumBatch <= 0 {
+		return fmt.Errorf("num_batch must be positive, got %d", *p.NumBatch)
+	}
+	if p.NumUBatch != nil && *p.NumUBatch <= 0 {
+		return fmt.Errorf("num_ubatch must be positive, got %d", *p.NumUBatch)
+	}
+	if p.LoadMode != nil && !valid(*p.LoadMode, ValidLoadModes) {
+		return fmt.Errorf("load_mode %q: must be one of %v", *p.LoadMode, ValidLoadModes)
 	}
 	if p.AllowPartialOffload != nil && *p.AllowPartialOffload {
 		if p.NumGPU == nil || *p.NumGPU < 0 || *p.NumGPU >= 99 {
@@ -423,12 +445,18 @@ func (p Profile) KeepAliveDuration() time.Duration {
 // Comparable on purpose: the supervisor reloads when two Runtimes differ.
 // The json tags match the request options vocabulary.
 type Runtime struct {
-	Model               string `json:"model"`
-	ModelPath           string `json:"model_path"`
-	ProjectorPath       string `json:"projector_path"`
-	NumCtx              int    `json:"num_ctx"`
-	CacheTypeK          string `json:"cache_type_k"`
-	CacheTypeV          string `json:"cache_type_v"`
+	Model           string `json:"model"`
+	ModelPath       string `json:"model_path"`
+	ProjectorPath   string `json:"projector_path"`
+	NumCtx          int    `json:"num_ctx"`
+	CacheTypeK      string `json:"cache_type_k"`
+	CacheTypeV      string `json:"cache_type_v"`
+	CacheTypeKDraft string `json:"cache_type_k_draft"`
+	CacheTypeVDraft string `json:"cache_type_v_draft"`
+	// Zero or empty leaves llama.cpp's own default.
+	NumBatch            int    `json:"num_batch"`
+	NumUBatch           int    `json:"num_ubatch"`
+	LoadMode            string `json:"load_mode"`
 	SpecType            string `json:"spec_type"`
 	SpecDraftNMax       int    `json:"spec_draft_n_max"`
 	SpecDraftNMin       int    `json:"spec_draft_n_min"`
@@ -468,6 +496,11 @@ func (p Profile) Runtime(model, modelPath, projectorPath string, embedding bool)
 		NumCtx:                deref(p.NumCtx, 32768),
 		CacheTypeK:            deref(p.CacheTypeK, "q8_0"),
 		CacheTypeV:            deref(p.CacheTypeV, "q8_0"),
+		CacheTypeKDraft:       deref(p.CacheTypeKDraft, ""),
+		CacheTypeVDraft:       deref(p.CacheTypeVDraft, ""),
+		NumBatch:              deref(p.NumBatch, 0),
+		NumUBatch:             deref(p.NumUBatch, 0),
+		LoadMode:              deref(p.LoadMode, ""),
 		SpecType:              deref(p.SpecType, ""),
 		SpecDraftNMax:         deref(p.SpecDraftNMax, 0),
 		SpecDraftNMin:         deref(p.SpecDraftNMin, 0),
