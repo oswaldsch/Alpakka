@@ -101,7 +101,7 @@ func (s *Server) handleBench(w http.ResponseWriter, r *http.Request) {
 	}
 
 	arrived := time.Now()
-	inst, profile, load, err := s.resolve(r.Context(), req.Model, req.Options, req.KeepAlive, false)
+	inst, profile, load, err := s.resolve(r.Context(), req.Model, req.Options, req.KeepAlive, false, false)
 	if err != nil {
 		writeResolveError(w, req.Model, err)
 		return

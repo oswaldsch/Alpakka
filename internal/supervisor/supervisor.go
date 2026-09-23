@@ -103,6 +103,19 @@ func (s *Supervisor) Ensure(ctx context.Context, rt config.Runtime) (*Instance, 
 	}
 }
 
+// Returns nil rather than loading when the resident instance serves a different model or mode,
+// so the caller can fall back to Ensure.
+func (s *Supervisor) AcquireIfModel(ctx context.Context, model string, embedding bool) *Instance {
+	cur := s.Current()
+	if cur == nil || cur.rt.Model != model || cur.rt.Embedding != embedding {
+		return nil
+	}
+	if err := cur.wait(ctx); err != nil || !cur.acquireIfLive() {
+		return nil
+	}
+	return cur
+}
+
 func (s *Supervisor) Current() *Instance {
 	s.mu.Lock()
 	defer s.mu.Unlock()

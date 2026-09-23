@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +52,7 @@ func TestOpenAIBodyPreservesUntouchedFields(t *testing.T) {
 		Temperature:     ptr(float32(0.7)),
 		ReasoningEffort: ptr("low"),
 	}
-	applyProfileToOpenAI(body, p)
+	applyProfileToOpenAI(body, p, "/v1/chat/completions")
 	delete(body, "keep_alive")
 
 	if string(body["messages"]) != origMessages {
@@ -98,7 +99,7 @@ func TestApplyProfileToOpenAIExplicitValueWins(t *testing.T) {
 	applyProfileToOpenAI(body, config.Profile{
 		Temperature:     ptr(float32(0.1)),
 		ReasoningEffort: ptr("low"),
-	})
+	}, "/v1/chat/completions")
 
 	var temp float64
 	if err := json.Unmarshal(body["temperature"], &temp); err != nil || temp != 0.9 {
@@ -145,3 +146,73 @@ func TestKeepAliveFromVariants(t *testing.T) {
 }
 
 func durPtr(d time.Duration) *time.Duration { return &d }
+
+// An unregistered path gets the mux's plain-text 404, a registered one reaches resolve and its JSON error.
+func TestMessagesRoutesReachTheProxy(t *testing.T) {
+	h := testServer(t)
+	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
+		w := do(t, h, http.MethodPost, path, `{"model":"no-such-model","messages":[]}`)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("%s: status = %d, want 404 (body: %s)", path, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || !strings.Contains(resp.Error.Message, "no-such-model") {
+			t.Fatalf("%s: body %q is not the proxy's model-not-found error", path, w.Body.String())
+		}
+	}
+}
+
+func TestApplyProfileToMessages(t *testing.T) {
+	body := map[string]json.RawMessage{
+		"messages": toRaw([]map[string]any{{"role": "user", "content": "hi"}}),
+		"stream":   toRaw(true),
+	}
+	body["model"] = toRaw("resolved-alias")
+	applyProfileToOpenAI(body, config.Profile{
+		Temperature:     ptr(float32(0.7)),
+		ReasoningEffort: ptr("low"),
+	}, "/v1/messages")
+
+	var final map[string]any
+	if err := json.Unmarshal(toRaw(body), &final); err != nil {
+		t.Fatal(err)
+	}
+	if final["model"] != "resolved-alias" {
+		t.Fatalf("model: got %v", final["model"])
+	}
+	if final["temperature"] != float64(0.7) {
+		t.Fatalf("temperature: got %v", final["temperature"])
+	}
+	kwargs, _ := final["chat_template_kwargs"].(map[string]any)
+	if kwargs["reasoning_effort"] != "low" {
+		t.Fatalf("chat_template_kwargs: got %v", final["chat_template_kwargs"])
+	}
+	if _, ok := final["stream_options"]; ok {
+		t.Fatalf("stream_options must not reach the Anthropic endpoint, got %v", final["stream_options"])
+	}
+}
+
+func TestApplyProfileToMessagesExplicitEffortWins(t *testing.T) {
+	for _, path := range []string{"/v1/messages", "/v1/messages/count_tokens"} {
+		body := map[string]json.RawMessage{
+			"stream":               toRaw(true),
+			"chat_template_kwargs": toRaw(map[string]any{"reasoning_effort": "xhigh"}),
+		}
+		applyProfileToOpenAI(body, config.Profile{ReasoningEffort: ptr("low")}, path)
+
+		var kwargs map[string]any
+		if err := json.Unmarshal(body["chat_template_kwargs"], &kwargs); err != nil {
+			t.Fatal(err)
+		}
+		if kwargs["reasoning_effort"] != "xhigh" {
+			t.Fatalf("%s: reasoning_effort: got %v", path, kwargs["reasoning_effort"])
+		}
+		if _, ok := body["stream_options"]; ok {
+			t.Fatalf("%s: stream_options injected", path)
+		}
+	}
+}

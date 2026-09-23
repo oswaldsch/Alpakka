@@ -366,6 +366,11 @@ Implemented: `/api/tags`, `/api/show`, `/api/ps`, `/api/version`, `/api/chat`,
 (`chat/completions`, `completions`, `embeddings`, `models`). Plus alpakka's own
 `/alpakka/bench` and `/alpakka/status`, on neither wire protocol.
 
+`/v1/messages` and `/v1/messages/count_tokens` proxy llama-server's own
+Anthropic endpoint, which is enough for Claude Code. llama-server forwards only
+`temperature`, `top_p`, `top_k`, `stream` and `chat_template_kwargs` from it, so
+profile `min_p` and `seed` have no effect there.
+
 Embeddings get their own llama-server. llama.cpp refuses `/v1/embeddings` unless
 the process was started with `--embeddings`, and refuses generation when it was,
 so there is no process that does both and switching between them reloads. Like

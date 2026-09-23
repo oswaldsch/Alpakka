@@ -26,7 +26,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, profile, load, err := s.resolve(r.Context(), req.Model, req.Options, req.KeepAlive, false)
+	inst, profile, load, err := s.resolve(r.Context(), req.Model, req.Options, req.KeepAlive, false, false)
 	if err != nil {
 		writeResolveError(w, req.Model, err)
 		return
@@ -82,7 +82,7 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inst, profile, load, err := s.resolve(r.Context(), req.Model, req.Options, req.KeepAlive, false)
+	inst, profile, load, err := s.resolve(r.Context(), req.Model, req.Options, req.KeepAlive, false, false)
 	if err != nil {
 		writeResolveError(w, req.Model, err)
 		return
@@ -354,7 +354,7 @@ func (s *Server) handleEmbed(w http.ResponseWriter, r *http.Request) {
 func (s *Server) embed(r *http.Request, model string, inputs []string,
 	opts map[string]any, keepAlive *api.Duration) ([][]float32, error) {
 
-	inst, _, _, err := s.resolve(r.Context(), model, opts, keepAlive, true)
+	inst, _, _, err := s.resolve(r.Context(), model, opts, keepAlive, true, false)
 	if err != nil {
 		return nil, err
 	}

@@ -196,6 +196,8 @@ The `/v1` surface is mostly proxied. Alpakka resolves/loads the model, injects
 missing configured sampling/template defaults, preserves explicit client
 values, rewrites the alias, and forwards streaming SSE. Process-level Alpakka
 options can be carried in a top-level `options` object.
+`/v1/messages` and `/v1/messages/count_tokens` (Anthropic) take the same path
+without `stream_options`. Profile `min_p` and `seed` are dropped by llama-server.
 
 ## Diagnosis without generating
 

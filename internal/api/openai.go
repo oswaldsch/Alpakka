@@ -41,7 +41,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	inst, profile, _, err := s.resolve(r.Context(), name, optionsFrom(body), keepAliveFrom(body),
-		r.URL.Path == "/v1/embeddings")
+		r.URL.Path == "/v1/embeddings", r.URL.Path == "/v1/messages/count_tokens")
 	if err != nil {
 		writeOpenAIResolveError(w, name, err)
 		return
@@ -50,7 +50,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 
 	// llama-server knows the model by the alias it was started with.
 	body["model"] = toRaw(inst.Runtime().Model)
-	applyProfileToOpenAI(body, profile)
+	applyProfileToOpenAI(body, profile, r.URL.Path)
 	delete(body, "keep_alive")
 
 	patched, err := json.Marshal(body)
@@ -111,7 +111,7 @@ func streamCopy(w http.ResponseWriter, r io.Reader) {
 	}
 }
 
-func applyProfileToOpenAI(body map[string]json.RawMessage, p config.Profile) {
+func applyProfileToOpenAI(body map[string]json.RawMessage, p config.Profile, path string) {
 	if p.ReasoningEffort != nil {
 		var kwargs map[string]any
 		_ = json.Unmarshal(body["chat_template_kwargs"], &kwargs)
@@ -131,7 +131,8 @@ func applyProfileToOpenAI(body map[string]json.RawMessage, p config.Profile) {
 	setIfAbsent(body, "min_p", p.MinP)
 	setIfAbsent(body, "seed", p.Seed)
 
-	if rawBool(body["stream"]) {
+	// stream_options is OpenAI-only, and the Anthropic stream already reports usage in message_delta.
+	if rawBool(body["stream"]) && !strings.HasPrefix(path, "/v1/messages") {
 		if _, ok := body["stream_options"]; !ok {
 			body["stream_options"] = toRaw(map[string]any{"include_usage": true})
 		}

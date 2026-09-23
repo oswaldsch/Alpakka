@@ -480,3 +480,31 @@ func TestDescribeChangeNamesGPUPlacement(t *testing.T) {
 		t.Errorf("reload reason does not mention placement: %s", got)
 	}
 }
+
+func TestAcquireIfModelReusesOnlyTheSameModel(t *testing.T) {
+	i := &Instance{
+		rt:      config.Runtime{Model: "qwen", NumCtx: 8192},
+		ready:   make(chan struct{}),
+		log:     newRing(4),
+		notable: newRing(4),
+	}
+	i.idle = sync.NewCond(&i.mu)
+	close(i.ready)
+	s := New(config.Llama{}, nil, nil)
+	s.cur = i
+
+	if got := s.AcquireIfModel(context.Background(), "qwen", false); got != i {
+		t.Fatal("same model with different runtime settings should be reused")
+	}
+	if !i.busy() {
+		t.Error("reuse did not take a reference")
+	}
+	i.Release()
+
+	if s.AcquireIfModel(context.Background(), "other", false) != nil {
+		t.Error("a different model was reused")
+	}
+	if s.AcquireIfModel(context.Background(), "qwen", true) != nil {
+		t.Error("a chat instance was reused for embedding")
+	}
+}

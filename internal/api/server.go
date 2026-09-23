@@ -51,6 +51,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/chat/completions", s.handleOpenAI)
 	mux.HandleFunc("/v1/completions", s.handleOpenAI)
 	mux.HandleFunc("/v1/embeddings", s.handleOpenAI)
+	mux.HandleFunc("/v1/messages", s.handleOpenAI)
+	mux.HandleFunc("/v1/messages/count_tokens", s.handleOpenAI)
 	mux.HandleFunc("GET /v1/models", s.handleOpenAIModels)
 
 	// alpakka's own surface, outside both wire protocols so no ollama or OpenAI client reaches it by accident.
@@ -242,7 +244,7 @@ func (s *Server) handlePS(w http.ResponseWriter, r *http.Request) {
 // The returned instance carries a reference, so every caller must defer Release. forEmbedding is
 // set by the endpoint since ollama embeds with any model, and a chat model asked to embed reloads into an embedding process.
 func (s *Server) resolve(ctx context.Context, name string, opts map[string]any, keepAlive *api.Duration,
-	forEmbedding bool) (*supervisor.Instance, config.Profile, time.Duration, error) {
+	forEmbedding, reuseResident bool) (*supervisor.Instance, config.Profile, time.Duration, error) {
 
 	m, err := s.Store.Get(name)
 	if err != nil {
@@ -268,6 +270,13 @@ func (s *Server) resolve(ctx context.Context, name string, opts map[string]any, 
 			s.logf("%s: num_ctx %d exceeds the model's trained %d, using %d",
 				m.Name, rt.NumCtx, trained, trained)
 			rt.NumCtx = trained
+		}
+	}
+
+	// Tokenizing needs only the right vocab, so a runtime-setting mismatch is no reason to reload.
+	if reuseResident {
+		if inst := s.Super.AcquireIfModel(ctx, rt.Model, rt.Embedding); inst != nil {
+			return inst, profile, 0, nil
 		}
 	}
 
