@@ -381,8 +381,7 @@ default would fail every load under `--fit off`.
 
 Out of scope: `/api/pull`, `/api/create`, `/api/push`, `/api/copy`,
 `/api/delete` return 501 pointing at `alpakka pull`. Adding a model is a
-command-line act, not an HTTP one. Also no auth, no multi-GPU, no concurrent
-models.
+command-line act, not an HTTP one. Also no auth and no concurrent models.
 
 ## Known divergences from ollama
 

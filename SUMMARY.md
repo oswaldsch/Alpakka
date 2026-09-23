@@ -7,10 +7,12 @@ that need to operate it without first reading the codebase.
 ## What it is
 
 Alpakka is an Ollama-compatible HTTP front end for a supervised `llama-server`.
-It does **not** fork Ollama, render chat templates, download models, or run an
-Ollama inference process. It:
+It does **not** fork Ollama, render chat templates, or run an Ollama inference
+process. Models are added only from the command line (`alpakka pull`,
+`alpakka import --from-ollama`), never over HTTP. It:
 
-1. reads Ollama's on-disk model store read-only;
+1. reads models read-only from its roots: a `<name>/<tag>.gguf` directory
+   and/or Ollama's on-disk store;
 2. resolves a requested tag to its GGUF, template, projector, and metadata;
 3. merges global, per-model, and per-request settings;
 4. starts exactly one `llama-server` with the required process-level flags;
@@ -32,8 +34,9 @@ optional RPC placement, and experimental KV/MoE controls.
 - llama.cpp build: `~/code/llama.cpp/build/bin` in the current install.
 - Ollama store: `/var/lib/ollama/.ollama/models`.
 
-Use port 11435 for inference and inspection. Use port 11434 for `ollama pull`
-and `ollama create`. Alpakka intentionally returns 501 for store mutations.
+Use port 11435 for inference and inspection. Add plain GGUFs with
+`alpakka pull`, or use port 11434 for `ollama pull` and `ollama create`.
+Alpakka intentionally returns 501 for store mutations over HTTP.
 
 ```bash
 OLLAMA_HOST=http://127.0.0.1:11435 ollama list
@@ -67,14 +70,8 @@ making 0.3 the Alpakka default. Put it in TOML or send it per request:
 temperature = 0.3
 ```
 
-Options split into two classes:
-
-- Request-level, no reload: `reasoning_effort`, `temperature`, `top_k`,
-  `top_p`, `min_p`, `typical_p`, penalties, mirostat settings, `seed`,
-  `num_predict`, `num_keep`, and `stop`.
-- Process-level, clean reload: model, `num_ctx`, K/V cache types, speculative
-  settings, GPU/offload settings, flash attention, backend, projector,
-  embedding/pooling mode, RPC/tensor placement, and experimental KV/MoE flags.
+Options are request-level (no reload) or process-level (clean reload). The full
+lists are under Options in `README.md`.
 
 Changing any process-level value produces a different comparable runtime and
 therefore reloads. A reload waits for active responses to finish; it never
@@ -131,10 +128,9 @@ first generated token.
 
 ## VRAM, context, and deliberate refusal
 
-Alpakka starts llama-server with `--fit off` and then requires the log to report
-every layer offloaded to the GPU. It refuses to serve a partial CPU spill. This
-is intentional: an OOM is preferable to Ollama silently moving weights to CPU
-and losing most decode performance.
+Alpakka refuses to serve a partial CPU spill (see "Fitting is enforced" in
+`README.md`). An OOM is preferable to Ollama silently moving weights to CPU and
+losing most decode performance.
 
 The displayed GGUF trained context (for example 262K) is not the configured
 runtime context. The runtime is the resolved `num_ctx`. A 262K metadata value
@@ -185,29 +181,10 @@ counts and cannot bypass output limits.
 
 ## API surface and compatibility
 
-Implemented Ollama endpoints:
-
-```text
-/api/tags  /api/show  /api/ps  /api/version
-/api/chat  /api/generate
-/api/embed /api/embeddings
-```
-
-Implemented OpenAI endpoints:
-
-```text
-/v1/models /v1/chat/completions /v1/completions /v1/embeddings
-```
-
-Alpakka-native inspection/benchmark endpoints:
-
-```text
-GET  /alpakka/status
-POST /alpakka/bench
-```
-
-Unsupported store mutations `/api/pull`, `/api/create`, `/api/push`,
-`/api/copy`, and `/api/delete` intentionally return 501. Use Ollama on 11434.
+Endpoints, embedding behavior and the known divergences from Ollama are under
+Scope and Known divergences in `README.md`. Store mutations (`/api/pull`,
+`/api/create`, `/api/push`, `/api/copy`, `/api/delete`) return 501: use
+`alpakka pull`, or Ollama on 11434.
 
 Ollama chat/generate requests are translated to llama-server's streaming
 OpenAI chat endpoint. llama-server is always asked to stream; Alpakka either
@@ -219,14 +196,6 @@ The `/v1` surface is mostly proxied. Alpakka resolves/loads the model, injects
 missing configured sampling/template defaults, preserves explicit client
 values, rewrites the alias, and forwards streaming SSE. Process-level Alpakka
 options can be carried in a top-level `options` object.
-
-Embeddings require a different llama-server mode, so switching between chat and
-embedding reloads even for the same model. A causal model without declared
-pooling gets `--pooling last`. Embedding context is capped to trained context.
-
-Capabilities intentionally follow live `/api/show`-style metadata rather than
-Ollama's sometimes-stale `/api/tags` cache. Models using an Ollama renderer may
-format differently because Alpakka deliberately uses the GGUF Jinja template.
 
 ## Diagnosis without generating
 
