@@ -33,6 +33,9 @@ func dirFixture(t *testing.T) *DirStore {
 	writeGGUF(t, filepath.Join(root, "qwen3.8-27b", "iq4-xs.mmproj.gguf"), map[string]any{
 		"general.architecture": "clip",
 	})
+	writeGGUF(t, filepath.Join(root, "qwen3.8-27b", "imatrix_unsloth.gguf"), map[string]any{
+		"general.type": "imatrix",
+	})
 	writeGGUF(t, filepath.Join(root, "embedgemma", "q8-0.gguf"), map[string]any{
 		"general.architecture": "gemma3",
 		"general.file_type":    uint32(7),

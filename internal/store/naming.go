@@ -9,6 +9,7 @@ type GGUFName struct {
 	Tag       string
 	Projector bool
 	Draft     bool
+	Imatrix   bool
 	Part      int
 	Parts     int
 }
@@ -25,6 +26,11 @@ func ParseGGUFName(filename string) GGUFName {
 	}
 	if strings.Contains(strings.ToLower(base), "mmproj") {
 		out.Projector = true
+		return out
+	}
+	// Unsloth ships imatrix_unsloth.gguf beside the quants. It is calibration data, not a model.
+	if strings.HasPrefix(strings.ToLower(base), "imatrix") {
+		out.Imatrix = true
 		return out
 	}
 	if isDraftName(base) {

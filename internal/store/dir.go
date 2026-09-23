@@ -158,6 +158,9 @@ func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
 		}
 
 		parsed := ParseGGUFName(e.Name())
+		if parsed.Imatrix {
+			continue
+		}
 		if parsed.Draft {
 			// A draft model is not servable on its own, serving one answers with the draft's output.
 			continue

@@ -9,6 +9,7 @@ func TestParseGGUFName(t *testing.T) {
 		tag       string
 		projector bool
 		draft     bool
+		imatrix   bool
 		part      int
 		parts     int
 	}{
@@ -20,6 +21,7 @@ func TestParseGGUFName(t *testing.T) {
 		{file: "mmproj-BF16.gguf", projector: true},
 		{file: "eagle3-gpt-oss-20b-Q8_0.gguf", draft: true},
 		{file: "eagle3-q8-0.gguf", draft: true},
+		{file: "imatrix_unsloth.gguf", imatrix: true},
 
 		{file: "mmproj-F16.gguf", projector: true},
 		{file: "Qwen3-VL-8B-mmproj-F32.gguf", projector: true},
@@ -30,6 +32,9 @@ func TestParseGGUFName(t *testing.T) {
 		{file: "some-model.gguf", name: "some-model"},
 	} {
 		got := ParseGGUFName(c.file)
+		if got.Imatrix != c.imatrix {
+			t.Errorf("%s: Imatrix = %v, want %v", c.file, got.Imatrix, c.imatrix)
+		}
 		if got.Draft != c.draft {
 			t.Errorf("%s: Draft = %v, want %v", c.file, got.Draft, c.draft)
 		}
