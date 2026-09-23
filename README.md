@@ -129,6 +129,11 @@ undoes with `rm`. It lists what it would do and needs `--apply` to act. The
 blobs are usually owned by the `ollama` user, and `fs.protected_hardlinks`
 stops anyone else linking them, so this wants `sudo`.
 
+`alpakka list` (or `ls`) and `alpakka ps` print what the running server can
+serve and what it has loaded. They ask the server rather than the store, since
+`-models` may point it at other roots than the config. `-host` picks another
+server.
+
 ## Configuration
 
 `~/.config/alpakka/config.toml`. Config keys use the same names as the request

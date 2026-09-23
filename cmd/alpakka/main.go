@@ -40,8 +40,12 @@ func run(args []string) error {
 		return pull(rest)
 	case "import":
 		return importModels(rest)
+	case "list", "ls":
+		return list(rest)
+	case "ps":
+		return ps(rest)
 	}
-	return fmt.Errorf("unknown command %q: expected serve, pull or import", cmd)
+	return fmt.Errorf("unknown command %q: expected serve, pull, import, list or ps", cmd)
 }
 
 func serve(args []string) error {
