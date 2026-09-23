@@ -9,14 +9,12 @@ import (
 	"github.com/oswald/alpakka/internal/store"
 )
 
-// Target is one file of a plan and where it lands in the store.
 type Target struct {
 	Path string
 	Repo string
 	Size int64
 }
 
-// Targets lists the files the plan writes, weights first.
 func (p *Plan) Targets(root string, withProjector bool) []Target {
 	dir := filepath.Join(root, p.Name)
 	out := make([]Target, 0, len(p.Weights)+1)
@@ -43,9 +41,8 @@ func (p *Plan) Targets(root string, withProjector bool) []Target {
 	return out
 }
 
-// Pull downloads a plan into root. An existing tag is left alone unless force
-// says otherwise, since the common mistake is asking for a model that is
-// already there and the cost of getting that wrong is the whole download.
+// An existing tag is left alone unless force is set, since asking for a model that is
+// already there is a common mistake that would cost the whole download.
 func (c *Client) Pull(ctx context.Context, plan *Plan, root string, withProjector, force bool) error {
 	targets := plan.Targets(root, withProjector)
 

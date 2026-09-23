@@ -44,7 +44,6 @@ projector = false
 	if cfg.Server.Listen != "127.0.0.1:11434" {
 		t.Errorf("listen = %q", cfg.Server.Listen)
 	}
-	// Untouched defaults must survive a partial file.
 	if got := deref(cfg.Defaults.CacheTypeK, ""); got != "q8_0" {
 		t.Errorf("cache_type_k = %q, want the default q8_0", got)
 	}
@@ -58,8 +57,6 @@ projector = false
 	}
 }
 
-// A request names a model as "name:tag"; the config file usually keys it by the
-// bare name. Both must resolve to the same profile.
 func TestForModelMatchesTaggedName(t *testing.T) {
 	cfg, err := Load(write(t, `
 [models."qwen3.8-27b-q3-32k"]
@@ -74,8 +71,7 @@ spec_draft_n_max = 2
 }
 
 func TestRejectsBadReasoningEffort(t *testing.T) {
-	// "high" is the dangerous one: the template silently promotes it to xhigh,
-	// which is the slow path the caller was trying to avoid.
+	// The template silently promotes "high" to xhigh, the slow path the caller wanted to avoid.
 	if _, err := Load(write(t, "[defaults]\nreasoning_effort = \"none\"\n")); err != nil {
 		t.Fatalf("reasoning_effort = none must be accepted: %v", err)
 	}
@@ -124,8 +120,7 @@ func TestRejectsBadWoLMAC(t *testing.T) {
 }
 
 func TestRejectsEUI64WoLMAC(t *testing.T) {
-	// A valid net.ParseMAC input but not a 6-byte MAC, which the magic packet
-	// format requires.
+	// Parses as a MAC but is not 6 bytes, which the magic packet format requires.
 	if _, err := Load(write(t, "[wol]\n\"192.168.178.62:50052\" = \"aa:bb:cc:ff:fe:dd:ee:ff\"\n")); err == nil {
 		t.Fatal("expected an 8-byte EUI-64 address to be rejected")
 	}
@@ -138,8 +133,6 @@ func TestKeepAliveDefaultsToFiveMinutes(t *testing.T) {
 	}
 }
 
-// The supervisor decides on reloads by comparing Runtime values, so equality
-// has to reflect every process-level flag.
 func TestRuntimeComparesProcessLevelFlags(t *testing.T) {
 	base := Profile{}.Runtime("m", "/blob", "", false)
 	if base != (Profile{}.Runtime("m", "/blob", "", false)) {
@@ -173,8 +166,6 @@ func TestBackendDirIsBinaryDirPlusBackend(t *testing.T) {
 	}
 }
 
-// Ollama honours these and llama-server accepts every one of them, so silently
-// dropping them was a divergence only a measurement would find.
 func TestApplyCarriesEverySamplerOllamaHonours(t *testing.T) {
 	p, err := Apply(Profile{}, map[string]any{
 		"mirostat":          2.0,
@@ -205,8 +196,6 @@ func TestApplyCarriesEverySamplerOllamaHonours(t *testing.T) {
 	}
 }
 
-// KV cache streaming is a process-level setting like spec_type: settable from
-// TOML and from a request's options, and a change has to force a reload.
 func TestKVStreamArenaIsProcessLevel(t *testing.T) {
 	p, err := Apply(Profile{}, map[string]any{"kv_stream_arena_mib": 2048.0})
 	if err != nil {
@@ -234,9 +223,6 @@ func TestKVStreamArenaIsProcessLevel(t *testing.T) {
 	}
 }
 
-// Putting expert tensors on the CPU changes what the process has to be started
-// with, so both keys have to survive TOML, a request's options and a merge, and
-// force a reload when they change.
 func TestMoEOffloadIsProcessLevel(t *testing.T) {
 	p, err := Apply(Profile{}, map[string]any{
 		"num_cpu_moe":     12.0,
@@ -269,8 +255,7 @@ func TestMoEOffloadIsProcessLevel(t *testing.T) {
 	}
 }
 
-// The expert cache is an unmerged draft upstream, so it has to stay off unless
-// asked for and reload like any other process-level setting when it is.
+// The expert cache is an unmerged draft upstream, so it stays off unless asked for.
 func TestMoEExpertCacheIsOffUnlessAskedFor(t *testing.T) {
 	p, err := Apply(Profile{}, map[string]any{
 		"moe_expert_cache":         8.0,
@@ -293,8 +278,8 @@ func TestMoEExpertCacheIsOffUnlessAskedFor(t *testing.T) {
 	}
 }
 
-// Upstream streams one sequence only, so a profile asking for both has to fail
-// at load rather than at the first concurrent request.
+// Upstream streams one sequence only, so a profile asking for both must fail at
+// load, not at the first concurrent request.
 func TestRejectsKVStreamArenaWithParallelAboveOne(t *testing.T) {
 	if _, err := Load(write(t, "[defaults]\nkv_stream_arena_mib = 2048\nparallel = 4\n")); err == nil {
 		t.Fatal("expected kv_stream_arena_mib with parallel = 4 to be rejected")
@@ -304,8 +289,6 @@ func TestRejectsKVStreamArenaWithParallelAboveOne(t *testing.T) {
 	}
 }
 
-// An embedding model needs a differently-started process, so the flag has to
-// reach Runtime and make two runtimes compare unequal.
 func TestEmbeddingIsPartOfTheRuntimeIdentity(t *testing.T) {
 	chat := Profile{}.Runtime("m", "/blob", "", false)
 	embed := Profile{}.Runtime("m", "/blob", "", true)
@@ -315,15 +298,12 @@ func TestEmbeddingIsPartOfTheRuntimeIdentity(t *testing.T) {
 	if !embed.Embedding {
 		t.Error("Runtime dropped the embedding flag")
 	}
-	// The profile overrides what the store detected.
 	off := Profile{Embeddings: ptr(false)}.Runtime("m", "/blob", "", true)
 	if off.Embedding {
 		t.Error("embeddings = false did not override detection")
 	}
 }
 
-// Placement flags are process-level: settable from TOML (list or comma string)
-// and from a request's options, and any change has to force a reload.
 func TestGPUPlacementIsProcessLevel(t *testing.T) {
 	p, err := Apply(Profile{}, map[string]any{
 		"device":        "Vulkan1, Vulkan0",
@@ -409,8 +389,7 @@ roots = ["~/models", "/var/lib/ollama/.ollama/models"]
 	}
 }
 
-// No [store] section leaves the choice of roots to the caller rather than
-// meaning there are none.
+// No [store] section leaves root choice to the caller, it does not mean there are none.
 func TestStoreRootsDefaultToNothing(t *testing.T) {
 	cfg, err := Load(write(t, "[server]\nlisten = \":1\"\n"))
 	if err != nil {

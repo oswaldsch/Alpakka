@@ -4,11 +4,8 @@ import (
 	"fmt"
 )
 
-// Apply layers an ollama options object onto a profile.
-//
-// alpakka's own settings ride in the same options object as ollama's. Ollama
-// ignores keys it does not recognise, so a request carrying spec_type stays
-// valid against both servers, which is what keeps the extension honest.
+// alpakka's own settings ride in the same options object. Ollama ignores
+// unknown keys, so a request carrying spec_type stays valid against both servers.
 func Apply(p Profile, opts map[string]any) (Profile, error) {
 	if len(opts) == 0 {
 		return p, nil
@@ -18,7 +15,6 @@ func Apply(p Profile, opts map[string]any) (Profile, error) {
 	for k, v := range opts {
 		var err error
 		switch k {
-		// Process-level.
 		case "num_ctx":
 			err = setInt(&out.NumCtx, k, v)
 		case "cache_type_k":
@@ -73,7 +69,6 @@ func Apply(p Profile, opts map[string]any) (Profile, error) {
 		case "pooling":
 			err = setStr(&out.Pooling, k, v)
 
-		// Request-level.
 		case "reasoning_effort":
 			err = setStr(&out.ReasoningEffort, k, v)
 		case "temperature":
@@ -110,7 +105,7 @@ func Apply(p Profile, opts map[string]any) (Profile, error) {
 			err = setInt(&out.NumKeep, k, v)
 
 		default:
-			// Unknown keys are ignored, exactly as ollama ignores ours.
+			// Ignored, as ollama ignores ours.
 			continue
 		}
 		if err != nil {
@@ -124,7 +119,7 @@ func Apply(p Profile, opts map[string]any) (Profile, error) {
 	return out, nil
 }
 
-// JSON numbers decode as float64, so every numeric option arrives as one.
+// JSON numbers decode as float64.
 func setInt(dst **int, key string, v any) error {
 	switch n := v.(type) {
 	case float64:
@@ -175,7 +170,6 @@ func setBool(dst **bool, key string, v any) error {
 	return nil
 }
 
-// setStrings accepts ollama's stop option, which may be a single string or a list.
 func setStrings(dst *[]string, key string, v any) error {
 	switch s := v.(type) {
 	case string:

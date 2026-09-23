@@ -1,8 +1,4 @@
-// Package store resolves models from disk.
-//
-// A Source is a place models come from; this file implements the one that
-// reads ollama's blob and manifest layout. It is strictly read-only: alpakka
-// resolves models another tool has already fetched and never writes here.
+// Package store resolves models from disk, read-only.
 package store
 
 import (
@@ -23,7 +19,6 @@ import (
 	"github.com/oswald/alpakka/internal/gguf"
 )
 
-// Layer media types used by ollama's manifests.
 const (
 	MediaModel     = "application/vnd.ollama.image.model"
 	MediaTemplate  = "application/vnd.ollama.image.template"
@@ -34,7 +29,6 @@ const (
 	MediaAdapter   = "application/vnd.ollama.image.adapter"
 )
 
-// DefaultRoot is where ollama keeps its models, honouring OLLAMA_MODELS.
 func DefaultRoot() string {
 	if v := os.Getenv("OLLAMA_MODELS"); v != "" {
 		return v
@@ -42,18 +36,15 @@ func DefaultRoot() string {
 	return "/var/lib/ollama/.ollama/models"
 }
 
-// Store is a read-only view of an ollama model store.
 type Store struct {
 	root  string
 	cache *ggufCache
 }
 
-// New opens the store rooted at dir, which contains blobs/ and manifests/.
 func New(root string) *Store {
 	return &Store{root: root, cache: newGGUFCache()}
 }
 
-// Root returns the store's root directory.
 func (s *Store) Root() string { return s.root }
 
 type manifest struct {
@@ -62,9 +53,8 @@ type manifest struct {
 	Layers        []Layer `json:"layers"`
 }
 
-// Config is ollama's config blob. It is the source of truth for the details
-// ollama reports: two manifests can point at the same weights blob and still
-// report different quantization levels, because this is where that is recorded.
+// The source of truth for ollama's reported details: two manifests can share a
+// weights blob and still report different quantization.
 type Config struct {
 	ModelFormat   string   `json:"model_format"`
 	ModelFamily   string   `json:"model_family"`
@@ -76,7 +66,6 @@ type Config struct {
 	Capabilities  []string `json:"capabilities"`
 }
 
-// Layer is one entry of a manifest.
 type Layer struct {
 	MediaType string `json:"mediaType"`
 	Digest    string `json:"digest"`
@@ -84,37 +73,33 @@ type Layer struct {
 	From      string `json:"from,omitempty"`
 }
 
-// Model is a model resolved from a Source.
 type Model struct {
-	Name        string // canonical "name:tag", as ollama reports it
-	Digest      string // stable id, matching /api/tags
-	Size        int64  // every file the model is made of
+	Name        string
+	Digest      string
+	Size        int64
 	ModifiedAt  time.Time
 	ParentModel string
 
-	ModelPath     string // file holding the GGUF weights
-	ProjectorPath string // vision projector, empty when the model has none
+	ModelPath     string
+	ProjectorPath string
 	Config        Config
 	Template      string
 	System        string
 	License       string
 	Params        map[string]any
 
-	// goTemplate says Template came from ollama's template layer rather than
-	// the jinja one in the GGUF, which decides whether the Go template
-	// variables are worth sniffing for capabilities.
+	// Template came from ollama's template layer rather than the GGUF's jinja, which
+	// decides whether Go template variables are worth sniffing for capabilities.
 	goTemplate bool
 	cache      *ggufCache
 }
 
-// blobPath maps a "sha256:abc" digest to its file in blobs/.
 func (s *Store) blobPath(digest string) string {
 	return filepath.Join(s.root, "blobs", strings.Replace(digest, ":", "-", 1))
 }
 
-// canonicalName renders a manifest path the way ollama names the model:
-// library models drop their registry and namespace, other registry.ollama.ai
-// models keep the namespace, and everything else keeps its full host path.
+// Library models drop registry and namespace, other registry.ollama.ai models keep
+// the namespace, and everything else keeps its full host path.
 func canonicalName(rel string) (string, bool) {
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	if len(parts) < 4 {
@@ -134,7 +119,6 @@ func canonicalName(rel string) (string, bool) {
 	}
 }
 
-// List returns every model in the store, newest first, matching /api/tags order.
 func (s *Store) List() ([]Model, error) {
 	dir := filepath.Join(s.root, "manifests")
 	var models []Model
@@ -156,8 +140,7 @@ func (s *Store) List() ([]Model, error) {
 		}
 		m, err := s.load(path, name)
 		if err != nil {
-			// A manifest that does not parse, or whose blobs were garbage
-			// collected, should not take down the whole listing.
+			// A manifest that does not parse or lost its blobs should not take down the listing.
 			return nil
 		}
 		models = append(models, *m)
@@ -171,12 +154,8 @@ func (s *Store) List() ([]Model, error) {
 	return models, nil
 }
 
-// Get resolves a model by name. The tag defaults to "latest".
-//
-// The name maps directly onto a manifest path, so the common case is one open
-// rather than a walk over the whole store. Every request resolves a model, and
-// /api/ps is polled, so the difference is between a handful of syscalls and
-// re-reading every manifest and config blob on the machine.
+// The name maps onto a manifest path, so the common case is one open rather than a
+// walk over every manifest and config blob, which matters since /api/ps is polled.
 func (s *Store) Get(name string) (*Model, error) {
 	want := name
 	if !strings.Contains(path(want), ":") {
@@ -191,8 +170,7 @@ func (s *Store) Get(name string) (*Model, error) {
 		}
 	}
 
-	// Fall back to a scan: a manifest may sit somewhere the direct mapping does
-	// not predict, and being right matters more here than being quick.
+	// Fall back to a scan since a manifest may sit where the mapping does not predict.
 	models, err := s.List()
 	if err != nil {
 		return nil, err
@@ -205,9 +183,8 @@ func (s *Store) Get(name string) (*Model, error) {
 	return nil, fmt.Errorf("%q: %w", name, ErrNotFound)
 }
 
-// manifestRel is canonicalName in reverse: it turns "qwen3:0.6b" back into
-// "registry.ollama.ai/library/qwen3/0.6b". It reports false for anything that
-// could escape the store, since the name arrives from an HTTP request.
+// The name arrives from an HTTP request, so this reports false for anything that
+// could escape the store.
 func manifestRel(name string) (string, bool) {
 	repo, tag := name, ""
 	p := path(name)
@@ -235,8 +212,7 @@ func manifestRel(name string) (string, bool) {
 	return strings.Join(parts, "/"), true
 }
 
-// path strips any registry host so a colon in "host:port" is not mistaken for
-// a tag separator.
+// Strips any registry host so a colon in host:port is not mistaken for a tag separator.
 func path(name string) string {
 	if i := strings.Index(name, "/"); i >= 0 {
 		return name[i:]
@@ -312,13 +288,11 @@ func (s *Store) readBlob(digest string) (string, error) {
 		return "", err
 	}
 	defer f.Close()
-	// Template and system blobs are small; cap the read so a mislabelled
-	// weights layer cannot pull gigabytes into memory.
+	// Template and system blobs are small, so cap the read against a mislabelled weights layer.
 	b, err := io.ReadAll(io.LimitReader(f, 1<<20))
 	return string(b), err
 }
 
-// GGUF parses and caches the model's GGUF metadata header.
 func (m *Model) GGUF() (*gguf.File, error) {
 	if m.cache == nil {
 		return gguf.Open(m.ModelPath)
@@ -326,9 +300,7 @@ func (m *Model) GGUF() (*gguf.File, error) {
 	return m.cache.open(m.ModelPath)
 }
 
-// Details renders the details object ollama reports in /api/tags, /api/show and
-// /api/ps. Family and quantization come from the config blob; the two lengths
-// are only in the GGUF header, and are omitted if it cannot be read.
+// The two lengths are only in the GGUF header and are omitted if it cannot be read.
 func (m *Model) Details() api.ModelDetails {
 	d := api.ModelDetails{
 		ParentModel:       m.ParentModel,
@@ -351,14 +323,8 @@ func (m *Model) Details() api.ModelDetails {
 	return d
 }
 
-// Capabilities reports what the model can do.
-//
-// This follows ollama's /api/show, which computes capabilities live from the
-// model itself. Ollama's /api/tags answers from a cache built at pull time and
-// the two genuinely disagree — /api/show reports audio and vision for
-// gemma4:e4b where /api/tags reports neither. /api/show is the endpoint clients
-// query to decide whether to send tools or ask for thinking, so it is the one
-// worth matching.
+// Follows /api/show, which computes live. /api/tags answers from a pull-time cache and
+// disagrees (gemma4:e4b), and clients query /api/show before sending tools or asking for thinking.
 func (m *Model) Capabilities() []model.Capability {
 	var caps []model.Capability
 	add := func(c model.Capability) {
@@ -378,8 +344,7 @@ func (m *Model) Capabilities() []model.Capability {
 	if err != nil {
 		add(model.CapabilityCompletion)
 	} else {
-		// The GGUF's own chat template is what llama.cpp will actually apply,
-		// so it is the honest source for what the model can be asked to do.
+		// The GGUF's own chat template is what llama.cpp applies, so it is the honest source.
 		tmpl, _ := f.String("tokenizer.chat_template")
 		if chatTemplateHasTools(tmpl) {
 			add(model.CapabilityTools)
@@ -407,7 +372,6 @@ func (m *Model) Capabilities() []model.Capability {
 	}
 
 	if m.goTemplate {
-		// Go templates expose these as template variables.
 		if strings.Contains(m.Template, "Tools") {
 			add(model.CapabilityTools)
 		}
@@ -432,14 +396,8 @@ func (m *Model) Capabilities() []model.Capability {
 	return caps
 }
 
-// parserCapabilities reports what one of ollama's built-in parsers supports.
-//
-// Ollama keeps this as a registry of parser implementations that changes with
-// every release. Rather than mirror that registry — the kind of permanent
-// rebase tax this project exists to avoid — this covers the parsers that models
-// in the store actually declare. An unknown parser reports nothing and the
-// model's own chat template decides, which is the right fallback: the template
-// is what llama.cpp will apply regardless.
+// Ollama's parser registry changes every release, so this covers only the parsers
+// models in the store declare. An unknown parser reports nothing and the chat template decides.
 func parserCapabilities(name string) (tools, thinking, known bool) {
 	switch name {
 	case "":
@@ -455,8 +413,6 @@ func parserCapabilities(name string) (tools, thinking, known bool) {
 	return false, false, false
 }
 
-// usesOllamaRenderedChat reports whether ollama would render the chat itself
-// rather than handing the messages to the model's own jinja template.
 func (m *Model) usesOllamaRenderedChat() bool {
 	return m.Config.Renderer != "" || m.Config.Parser != "" || m.goTemplate
 }
@@ -475,18 +431,15 @@ func chatTemplateHasThinking(tmpl string) bool {
 	if strings.Contains(tmpl, "<think>") && strings.Contains(tmpl, "</think>") {
 		return true
 	}
-	// Some Qwen and DeepSeek templates strip earlier reasoning by splitting
-	// assistant content on the closing tag; reasoning is still extractable.
+	// Some Qwen and DeepSeek templates strip earlier reasoning by splitting on the
+	// closing tag, so reasoning is still extractable.
 	return (strings.Contains(tmpl, "content.split('</think>')") ||
 		strings.Contains(tmpl, `content.split("</think>")`)) &&
 		!strings.Contains(tmpl, "reasoning_content") &&
 		!strings.Contains(tmpl, "<SPECIAL_12>")
 }
 
-// IsEmbedding reports whether the model produces embeddings rather than text.
-//
-// llama-server has to be started with --embeddings for one and without it for
-// the other, so this decides a process-level flag, not a request field.
+// Decides a process-level flag: llama-server needs --embeddings for one and not the other.
 func (m *Model) IsEmbedding() bool {
 	for _, c := range m.Capabilities() {
 		if c == model.CapabilityEmbedding {
@@ -496,8 +449,7 @@ func (m *Model) IsEmbedding() bool {
 	return false
 }
 
-// DeclaresPooling reports whether the GGUF names its own pooling type, which
-// dedicated embedding models do and causal models do not.
+// Dedicated embedding models name a pooling type and causal models do not.
 func (m *Model) DeclaresPooling() bool {
 	f, err := m.GGUF()
 	if err != nil {
@@ -507,8 +459,6 @@ func (m *Model) DeclaresPooling() bool {
 	return ok
 }
 
-// TrainedContext is the context length the model was trained for, or zero when
-// the GGUF header does not say.
 func (m *Model) TrainedContext() int {
 	f, err := m.GGUF()
 	if err != nil {
@@ -520,7 +470,6 @@ func (m *Model) TrainedContext() int {
 	return 0
 }
 
-// ListResponse renders the model as an /api/tags entry.
 func (m *Model) ListResponse() api.ListModelResponse {
 	return api.ListModelResponse{
 		Name:         m.Name,

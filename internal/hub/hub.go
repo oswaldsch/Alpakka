@@ -13,7 +13,6 @@ import (
 	"github.com/oswald/alpakka/internal/store"
 )
 
-// DefaultEndpoint is HuggingFace, honouring the variable its own tooling uses.
 func DefaultEndpoint() string {
 	if v := os.Getenv("HF_ENDPOINT"); v != "" {
 		return strings.TrimSuffix(v, "/")
@@ -21,7 +20,6 @@ func DefaultEndpoint() string {
 	return "https://huggingface.co"
 }
 
-// Client talks to one HuggingFace-shaped endpoint.
 type Client struct {
 	HTTP     *http.Client
 	Endpoint string
@@ -29,8 +27,7 @@ type Client struct {
 	Logf     func(string, ...any)
 }
 
-// NewClient reads the token from the environment, which is the only way a
-// gated repo can be pulled without prompting for one.
+// The token comes from the environment, the only way a gated repo pulls without prompting.
 func NewClient(logf func(string, ...any)) *Client {
 	token := os.Getenv("HF_TOKEN")
 	if token == "" {
@@ -42,7 +39,6 @@ func NewClient(logf func(string, ...any)) *Client {
 	return &Client{HTTP: http.DefaultClient, Endpoint: DefaultEndpoint(), Token: token, Logf: logf}
 }
 
-// Entry is one file in a repo.
 type Entry struct {
 	Type string `json:"type"`
 	Path string `json:"path"`
@@ -52,8 +48,7 @@ type Entry struct {
 	} `json:"lfs"`
 }
 
-// size is the real file size; for an LFS file the outer one may describe the
-// pointer rather than the object.
+// For an LFS file the outer size may describe the pointer, not the object.
 func (e Entry) size() int64 {
 	if e.LFS != nil && e.LFS.Size > 0 {
 		return e.LFS.Size
@@ -61,7 +56,6 @@ func (e Entry) size() int64 {
 	return e.Size
 }
 
-// Tree lists the GGUF files in a repo revision.
 func (c *Client) Tree(ctx context.Context, repo, revision string) ([]Entry, error) {
 	u := fmt.Sprintf("%s/api/models/%s/tree/%s?recursive=1",
 		c.Endpoint, escapePath(repo), escapePath(revision))
@@ -95,25 +89,21 @@ func (c *Client) Tree(ctx context.Context, repo, revision string) ([]Entry, erro
 	return out, nil
 }
 
-// Plan is what a Ref resolved to: the files to fetch and the name to store
-// them under.
 type Plan struct {
 	Repo      string
 	Revision  string
 	Name      string
 	Tag       string
-	Weights   []Entry // in split order; one entry when the model is not split
-	Projector *Entry  // the repo's mmproj, whether or not it was asked for
+	Weights   []Entry
+	Projector *Entry // the repo's mmproj, whether or not it was asked for
 	Size      int64
 }
 
-// group is one candidate model in a repo: every part of one quantization.
 type group struct {
 	tag   string
 	parts []Entry
 }
 
-// Resolve turns a reference into a concrete set of files to download.
 func (c *Client) Resolve(ctx context.Context, ref Ref) (*Plan, error) {
 	entries, err := c.Tree(ctx, ref.Repo, ref.Revision)
 	if err != nil {
@@ -128,9 +118,7 @@ func (c *Client) Resolve(ctx context.Context, ref Ref) (*Plan, error) {
 	for i, e := range entries {
 		parsed := store.ParseGGUFName(e.Path)
 		if parsed.Projector {
-			// The largest projector in a repo is the one to keep: publishers
-			// ship F32 beside F16 and the quality difference is free at this
-			// size.
+			// Publishers ship F32 beside F16, and the larger costs nothing at this size.
 			if projector == nil || e.size() > projector.size() {
 				projector = &entries[i]
 			}
@@ -201,8 +189,7 @@ func pick(ref Ref, groups map[string]*group) (*group, error) {
 	return nil, fmt.Errorf("%s has no %s, only: %s", ref.Repo, ref.Quant, strings.Join(tags, ", "))
 }
 
-// modelName prefers what the filename says the model is, and falls back to the
-// repo, whose -GGUF suffix names the format rather than the model.
+// The repo's -GGUF suffix names the format rather than the model.
 func modelName(repo, file string) string {
 	if name := store.ParseGGUFName(file).Name; name != "" {
 		return name
@@ -213,15 +200,13 @@ func modelName(repo, file string) string {
 	return store.Slug(base)
 }
 
-// FileURL is where one repo file is downloaded from.
 func (c *Client) FileURL(repo, revision, path string) string {
 	return fmt.Sprintf("%s/%s/resolve/%s/%s",
 		c.Endpoint, escapePath(repo), escapePath(revision), escapePath(path))
 }
 
-// escapePath escapes each segment on its own. The separators are part of the
-// route, so escaping the whole thing turns owner/repo into one component and
-// the request 400s.
+// The separators are part of the route, so escaping the whole path turns
+// owner/repo into one component and the request 400s.
 func escapePath(p string) string {
 	parts := strings.Split(p, "/")
 	for i, s := range parts {

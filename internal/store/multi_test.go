@@ -68,7 +68,6 @@ func TestMultiFirstRootWins(t *testing.T) {
 	}
 }
 
-// The same name is only logged once, or every /api/tags poll would repeat it.
 func TestMultiLogsAShadowedNameOnce(t *testing.T) {
 	m := layered(t)
 	var shadowed int
@@ -106,8 +105,6 @@ func TestMultiGetFallsThroughToLaterRoots(t *testing.T) {
 	}
 }
 
-// An ambiguous bare name is an answer, not a miss: falling through to the next
-// root would serve a different model than the one the name pointed at.
 func TestMultiKeepsTheAmbiguousNameError(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
 	kv := map[string]any{"general.architecture": "qwen35", "general.file_type": uint32(15)}

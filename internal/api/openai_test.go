@@ -9,10 +9,8 @@ import (
 	"github.com/oswald/alpakka/internal/config"
 )
 
-// TestOpenAIBodyPreservesUntouchedFields exercises the map[string]json.RawMessage
-// path handleOpenAI patches through: only model/options/keep_alive/profile
-// fields are inspected, so a large, unrelated field like messages must survive
-// byte-for-byte.
+// Only model/options/keep_alive/profile are inspected, so a large unrelated field like messages
+// must survive byte-for-byte.
 func TestOpenAIBodyPreservesUntouchedFields(t *testing.T) {
 	big := make([]map[string]any, 0, 500)
 	for i := 0; i < 500; i++ {
@@ -92,8 +90,6 @@ func TestOpenAIBodyPreservesUntouchedFields(t *testing.T) {
 	}
 }
 
-// TestApplyProfileToOpenAIExplicitValueWins matches ollama's own semantics:
-// a caller-provided sampler value is never overridden by the profile.
 func TestApplyProfileToOpenAIExplicitValueWins(t *testing.T) {
 	body := map[string]json.RawMessage{
 		"temperature":          toRaw(0.9),

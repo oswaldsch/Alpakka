@@ -1,5 +1,4 @@
-// Package config holds alpakka's settings: where llama-server lives, and the
-// per-model flag profiles that ollama has no way to express.
+// Package config holds alpakka's settings and per-model llama-server flag profiles.
 package config
 
 import (
@@ -14,60 +13,41 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Config is the whole of ~/.config/alpakka/config.toml.
 type Config struct {
 	Server Server `toml:"server"`
 	Store  Store  `toml:"store"`
 	Llama  Llama  `toml:"llama"`
-	// WoL maps an RPC endpoint's "host:port", as it appears in a profile's
-	// rpc_servers, to the MAC address of the machine behind it. A load that
-	// offloads onto the endpoint sends that address a Wake-on-LAN magic packet
-	// first, on the LAN broadcast address, so a sleeping node does not have to
-	// be woken by hand.
+	// Maps an rpc_servers "host:port" to the MAC that gets a Wake-on-LAN packet
+	// before a load offloads onto it.
 	WoL      map[string]string  `toml:"wol"`
 	Defaults Profile            `toml:"defaults"`
 	Models   map[string]Profile `toml:"models"`
 }
 
-// Server is where alpakka listens.
 type Server struct {
 	Listen string `toml:"listen"`
-	// Origins are the browser origins allowed to call the API. Empty means
-	// ollama's own default set: any port on localhost, plus the schemes
-	// desktop clients use. Browser clients cannot talk to alpakka at all
-	// without this, and the failure is a CORS error with no server-side trace.
+	// Empty means ollama's default origins. Without them browser clients fail
+	// with a CORS error and no server-side trace.
 	Origins []string `toml:"origins"`
 }
 
-// Store is where models are read from. Roots are searched in order and the
-// first one holding a name serves it, so a root listed earlier shadows a copy
-// of the same model further down. A root with a manifests/ directory is read
-// as an ollama store, anything else as a directory of GGUF files. Leaving this
-// empty searches ~/models and then ollama's own root.
+// Roots are searched in order, so an earlier root shadows later ones. A root
+// with manifests/ is an ollama store, anything else a GGUF directory.
 type Store struct {
 	Roots []string `toml:"roots"`
 }
 
-// Llama locates the llama.cpp build to drive.
 type Llama struct {
-	// LibDir holds llama-server and the per-backend subdirectories.
-	LibDir string `toml:"lib_dir"`
-	// Backend names the subdirectory of LibDir holding the ggml backend
-	// libraries, e.g. "rocm_v7_2" or "vulkan".
+	LibDir  string `toml:"lib_dir"`
 	Backend string `toml:"backend"`
 }
 
-// Binary is the llama-server executable.
 func (l Llama) Binary() string { return filepath.Join(l.LibDir, "llama-server") }
 
-// BackendDir is the directory the server must run from. ggml looks for
-// libggml-hip.so in the executable's directory and the working directory; if it
-// finds neither the server starts on CPU at a few tokens a second and says
-// nothing about it.
+// ggml only looks for libggml-hip.so in the executable and working directories,
+// otherwise the server silently runs on CPU.
 func (l Llama) BackendDir() string { return filepath.Join(l.LibDir, l.Backend) }
 
-// StringList is a list that a config file may also write as one comma
-// separated string, matching how llama.cpp takes --device.
 type StringList []string
 
 func (l *StringList) UnmarshalTOML(v any) error {
@@ -100,11 +80,10 @@ func splitList(s string) []string {
 	return out
 }
 
-// Profile is a set of overrides. Every field is a pointer so that "unset" is
-// distinguishable from "set to the zero value", which is what lets a request's
-// options layer cleanly over a model's defaults over the global defaults.
+// Fields are pointers so unset differs from the zero value, letting request
+// options layer over model defaults over global defaults.
 type Profile struct {
-	// Process-level: changing any of these requires a llama-server restart.
+	// Process-level: a change requires a llama-server restart.
 	NumCtx        *int    `toml:"num_ctx"`
 	CacheTypeK    *string `toml:"cache_type_k"`
 	CacheTypeV    *string `toml:"cache_type_v"`
@@ -112,54 +91,39 @@ type Profile struct {
 	SpecDraftNMax *int    `toml:"spec_draft_n_max"`
 	SpecDraftNMin *int    `toml:"spec_draft_n_min"`
 	NumGPU        *int    `toml:"num_gpu"`
-	// AllowPartialOffload permits a deliberately bounded -ngl profile to leave
-	// whole layers on the CPU. False/unset retains the strict fit guarantee.
+	// Lets a bounded -ngl profile leave layers on the CPU. Unset keeps the strict fit check.
 	AllowPartialOffload *bool `toml:"allow_partial_offload"`
-	// GPUVRAMCapMiB is a fail-closed post-load ceiling measured from the child
-	// process' DRM fdinfo, including caches and graphs as well as weights.
+	// Fail-closed ceiling measured from the child's DRM fdinfo, including caches and graphs.
 	GPUVRAMCapMiB *int    `toml:"gpu_vram_cap_mib"`
 	Parallel      *int    `toml:"parallel"`
 	FlashAttn     *string `toml:"flash_attn"`
 	Projector     *bool   `toml:"projector"`
 	Backend       *string `toml:"backend"`
-	// NumCPUMoE and OverrideTensor place chosen tensors on the CPU on purpose.
-	// This is not the spill the fit check refuses: "offloaded N/M layers" counts
-	// -ngl against the layer count and ignores per-tensor placement, so a load
-	// steered here still reports N/N and still has to.
+	// Deliberate CPU placement, not the spill the fit check refuses. The
+	// offloaded N/M count ignores per-tensor placement, so it still reports N/N.
 	NumCPUMoE      *int     `toml:"num_cpu_moe"`
 	OverrideTensor []string `toml:"override_tensor"`
-	// RPCServers are llama.cpp RPC backend endpoints ("host:port"), each one
-	// another device the layer split can land on. rpc-server has no auth or
-	// encryption, so these must be LAN-only.
+	// rpc-server has no auth or encryption, so these must be LAN-only.
 	RPCServers []string `toml:"rpc_servers"`
-	// Device, TensorSplit, SplitMode and MainGPU steer which local GPUs the
-	// weights land on. llama.cpp keeps each layer's KV cache on the GPU holding
-	// that layer, so this is the only way to move KV between cards;
-	// NoKVOffload moves it to host RAM instead.
+	// llama.cpp keeps each layer's KV on the GPU holding that layer, so this is
+	// the only way to move KV between cards. NoKVOffload moves it to host RAM.
 	Device      StringList `toml:"device"`
 	TensorSplit *string    `toml:"tensor_split"`
 	SplitMode   *string    `toml:"split_mode"`
 	MainGPU     *int       `toml:"main_gpu"`
 	NoKVOffload *bool      `toml:"no_kv_offload"`
-	// MoEExpertCache and MoEExpertCacheInserts are llama.cpp PR #27861, an
-	// unmerged draft: a VRAM LRU over host-resident experts, decode-only, and
-	// pointless without NumCPUMoE or OverrideTensor putting experts there.
+	// llama.cpp PR #27861, unmerged: a decode-only VRAM LRU over host experts,
+	// pointless without NumCPUMoE or OverrideTensor.
 	MoEExpertCache        *int `toml:"moe_expert_cache"`
 	MoEExpertCacheInserts *int `toml:"moe_expert_cache_inserts"`
-	// KVStreamArenaMiB keeps the authoritative KV cache in pinned host RAM and
-	// streams pages through a VRAM arena of this size, which buys context a card
-	// could not otherwise hold. Zero or unset is llama.cpp's normal behaviour.
-	// The MTP draft context does not stream and shares no pool with it, so a
-	// draft cache still needs its own VRAM on top of the arena.
+	// Streams KV pages from pinned host RAM through a VRAM arena of this size. The
+	// MTP draft context is not streamed and needs its own VRAM on top.
 	KVStreamArenaMiB *int `toml:"kv_stream_arena_mib"`
-	// Embeddings restricts the process to the embedding endpoints.
-	// llama-server refuses /v1/embeddings without it, and refuses generation
-	// with it, so it is process-level and normally detected from the model.
+	// llama-server refuses /v1/embeddings without it and refuses generation with
+	// it, so it is process-level.
 	Embeddings *bool `toml:"embeddings"`
-	// Pooling is how token embeddings are reduced to one vector. Left unset,
-	// the model's own choice applies, which is what a dedicated embedding model
-	// wants; a causal model has none, and llama.cpp's OpenAI endpoint rejects
-	// "none" outright.
+	// Unset uses the model's own pooling. A causal model has none and llama.cpp's
+	// OpenAI endpoint rejects "none".
 	Pooling *string `toml:"pooling"`
 
 	// Request-level: applied per request, no restart.
@@ -173,9 +137,6 @@ type Profile struct {
 	NumPredict      *int     `toml:"num_predict"`
 	Stop            []string `toml:"stop"`
 
-	// The rest of ollama's sampler options. llama-server accepts every one of
-	// these under the same name, so dropping them silently was a divergence
-	// that could only be found by measuring the output.
 	Mirostat         *int     `toml:"mirostat"`
 	MirostatTau      *float32 `toml:"mirostat_tau"`
 	MirostatEta      *float32 `toml:"mirostat_eta"`
@@ -188,9 +149,8 @@ type Profile struct {
 	KeepAlive *string `toml:"keep_alive"`
 }
 
-// Default is the configuration used when no file exists. It encodes the machine
-// this was built for: ollama's llama.cpp build on the ROCm backend, and the
-// settings the benchmarks in gfx1200-lab showed to be worth having.
+// Encodes the author's machine: ollama's llama.cpp on ROCm, with the settings
+// the gfx1200-lab benchmarks favoured.
 func Default() Config {
 	return Config{
 		Server: Server{Listen: "127.0.0.1:11435"},
@@ -209,7 +169,6 @@ func Default() Config {
 	}
 }
 
-// DefaultPath is the config file location, honouring XDG_CONFIG_HOME.
 func DefaultPath() string {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
@@ -222,8 +181,6 @@ func DefaultPath() string {
 	return filepath.Join(dir, "alpakka", "config.toml")
 }
 
-// Load reads the config at path, layering it over Default. A missing file is
-// not an error: alpakka runs on its defaults.
 func Load(path string) (Config, error) {
 	cfg := Default()
 
@@ -266,8 +223,6 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// expandRoots resolves a leading ~, which a config file is the natural place
-// to write and which no shell expands on alpakka's behalf.
 func expandRoots(roots []string) []string {
 	home, err := os.UserHomeDir()
 	out := make([]string, 0, len(roots))
@@ -280,13 +235,12 @@ func expandRoots(roots []string) []string {
 	return out
 }
 
-// ForModel returns the global defaults with the model's own overrides applied.
 func (c Config) ForModel(name string) Profile {
 	p := c.Defaults
 	if over, ok := c.Models[name]; ok {
 		p = Merge(p, over)
 	}
-	// A config may key a model by its bare name while requests use name:tag.
+	// A config may key a model by bare name while requests use name:tag.
 	if bare, _, ok := splitTag(name); ok {
 		if over, ok := c.Models[bare]; ok {
 			p = Merge(p, over)
@@ -307,7 +261,6 @@ func splitTag(name string) (string, string, bool) {
 	return "", "", false
 }
 
-// Merge layers over onto base; only fields set in over take effect.
 func Merge(base, over Profile) Profile {
 	out := base
 	setIf(&out.NumCtx, over.NumCtx)
@@ -373,24 +326,16 @@ func setIf[T any](dst **T, src *T) {
 
 func ptr[T any](v T) *T { return &v }
 
-// ValidPoolings are the reductions llama.cpp implements.
 var ValidPoolings = []string{"none", "mean", "cls", "last", "rank"}
 
-// ValidSplitModes are the values llama-server's --split-mode accepts.
 var ValidSplitModes = []string{"none", "layer", "row", "tensor"}
 
 var reTensorSplit = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(,[0-9]+(\.[0-9]+)?)*$`)
 
-// ValidEfforts are the values a Qwen chat template accepts. It rejects anything
-// else outright and silently promotes "high" to "xhigh", so alpakka refuses the
-// values that would not mean what the caller intended.
-//
-// "none" is what turns thinking off, and without it a thinking model is useless
-// as an assistant: Qwen3.5-9B answers a one-sentence question with 1600
-// characters of reasoning and no answer at all, even at "low".
+// Qwen templates reject anything else and silently promote "high" to "xhigh".
+// "none" is what turns thinking off, since even "low" yields pages of reasoning and no answer.
 var ValidEfforts = []string{"none", "low", "medium", "xhigh"}
 
-// Validate checks the values alpakka can reject before a slow model load.
 func (c Config) Validate() error {
 	if err := c.Defaults.Validate(); err != nil {
 		return fmt.Errorf("defaults: %w", err)
@@ -412,7 +357,6 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Validate checks a single profile.
 func (p Profile) Validate() error {
 	if p.ReasoningEffort != nil {
 		if !valid(*p.ReasoningEffort, ValidEfforts) {
@@ -465,8 +409,6 @@ func valid(v string, allowed []string) bool {
 	return false
 }
 
-// KeepAliveDuration resolves the profile's keep-alive, falling back to ollama's
-// own five-minute default.
 func (p Profile) KeepAliveDuration() time.Duration {
 	if p.KeepAlive == nil {
 		return 5 * time.Minute
@@ -478,18 +420,12 @@ func (p Profile) KeepAliveDuration() time.Duration {
 	return d
 }
 
-// Runtime is the fully resolved set of process-level settings for one
-// llama-server. It is deliberately comparable: the supervisor decides whether a
-// request can be served by the running process by comparing two of these, so a
-// changed flag causes a clean reload instead of being silently ignored until
-// the next cold start.
-//
-// The json tags name each field the way the request options object does, so a
-// benchmark result reads back in the vocabulary it was asked in.
+// Comparable on purpose: the supervisor reloads when two Runtimes differ.
+// The json tags match the request options vocabulary.
 type Runtime struct {
-	Model               string `json:"model"` // canonical model name, for logs and /api/ps
+	Model               string `json:"model"`
 	ModelPath           string `json:"model_path"`
-	ProjectorPath       string `json:"projector_path"` // empty when the projector is disabled or absent
+	ProjectorPath       string `json:"projector_path"`
 	NumCtx              int    `json:"num_ctx"`
 	CacheTypeK          string `json:"cache_type_k"`
 	CacheTypeV          string `json:"cache_type_v"`
@@ -503,40 +439,27 @@ type Runtime struct {
 	FlashAttn           string `json:"flash_attn"`
 	Backend             string `json:"backend"`
 	NumCPUMoE           int    `json:"num_cpu_moe"`
-	// OverrideTensor is the profile's entries joined by commas, which is
-	// llama.cpp's own separator for the flag, so nothing an entry could carry is
-	// lost by flattening it. A slice here would cost Runtime its comparability
-	// and with it the reload check.
+	// Joined by commas, llama.cpp's own separator, so nothing is lost. A slice
+	// would cost Runtime its comparability.
 	OverrideTensor string `json:"override_tensor"`
-	// RPCServers is the profile's entries joined by commas, llama.cpp's own
-	// separator for --rpc.
-	RPCServers string `json:"rpc_servers"`
-	// Device is the profile's entries joined by commas, as --device takes them.
-	Device      string `json:"device"`
-	TensorSplit string `json:"tensor_split"`
-	SplitMode   string `json:"split_mode"`
-	// MainGPU is -1 when unset, because 0 is a real device index.
-	MainGPU     int  `json:"main_gpu"`
-	NoKVOffload bool `json:"no_kv_offload"`
-	// MoEExpertCache is llama.cpp PR #27861's --moe-expert-cache, absent from
-	// every released build.
-	MoEExpertCache        int `json:"moe_expert_cache"`
-	MoEExpertCacheInserts int `json:"moe_expert_cache_inserts"`
-	// KVStreamArenaMiB is llama.cpp's --kv-stream-arena-mib, zero when the KV
-	// cache lives in VRAM as usual.
-	KVStreamArenaMiB int `json:"kv_stream_arena_mib"`
-	// Embedding starts llama-server with --embeddings. It is part of Runtime
-	// because llama-server cannot serve both generation and embeddings from
-	// one process: switching between the two has to reload.
-	Embedding bool `json:"embeddings"`
-	// Pooling is llama.cpp's --pooling, empty for the model's own default.
-	Pooling string `json:"pooling"`
+	RPCServers     string `json:"rpc_servers"`
+	Device         string `json:"device"`
+	TensorSplit    string `json:"tensor_split"`
+	SplitMode      string `json:"split_mode"`
+	// -1 when unset, because 0 is a real device index.
+	MainGPU               int  `json:"main_gpu"`
+	NoKVOffload           bool `json:"no_kv_offload"`
+	MoEExpertCache        int  `json:"moe_expert_cache"`
+	MoEExpertCacheInserts int  `json:"moe_expert_cache_inserts"`
+	KVStreamArenaMiB      int  `json:"kv_stream_arena_mib"`
+	// llama-server cannot serve generation and embeddings from one process, so
+	// switching between them reloads.
+	Embedding bool   `json:"embeddings"`
+	Pooling   string `json:"pooling"`
 }
 
-// Runtime resolves the profile's process-level settings for a model.
-// projectorPath is the projector the store found; the profile can suppress it,
-// which on a 16 GB card is the difference between fitting and not. embedding is
-// what the store detected the model to be; the profile can override that too.
+// The profile can suppress the projector, which on a 16 GB card decides whether
+// the model fits, and can override the detected embedding flag.
 func (p Profile) Runtime(model, modelPath, projectorPath string, embedding bool) Runtime {
 	rt := Runtime{
 		Model:                 model,

@@ -20,8 +20,7 @@ func TestInhibitorStartsAndStops(t *testing.T) {
 
 	stopInhibitor(cmd)
 
-	// ProcessState.Exited() is false for a SIGTERM exit, so this only checks
-	// that Wait returned rather than that the exit was "clean".
+	// ProcessState.Exited() is false after SIGTERM, so this only checks that Wait returned.
 	if cmd.ProcessState == nil {
 		t.Error("expected the inhibitor process to have been reaped")
 	}

@@ -6,12 +6,9 @@ import (
 	"github.com/oswald/alpakka/internal/config"
 )
 
-// logVerbosity is the llama-server log threshold. It has to be high enough that
-// the "offloaded N/M layers to GPU" line is printed, because that line is what
-// the fit check reads. The output is consumed by the supervisor, not the user.
+// High enough to print the "offloaded N/M layers to GPU" line, which the fit check reads.
 const logVerbosity = "5"
 
-// Args builds the llama-server command line for a runtime.
 func Args(rt config.Runtime, port int) []string {
 	args := []string{
 		"--model", rt.ModelPath,
@@ -21,14 +18,12 @@ func Args(rt config.Runtime, port int) []string {
 		"--no-webui",
 		"-lv", logVerbosity,
 
-		// Chat templating is llama.cpp's job. Its jinja path is the only place
-		// chat_template_kwargs exists, and reasoning_effort rides on that.
+		// Chat templating is llama.cpp's job. Only its jinja path has
+		// chat_template_kwargs, which reasoning_effort rides on.
 		"--jinja",
 
-		// Never let llama.cpp quietly shrink the context or the offload to make
-		// something fit. Explicit settings must be honoured or the load must
-		// fail; a silently downgraded load is the failure mode this project
-		// exists to avoid.
+		// Never let llama.cpp quietly shrink context or offload to make something fit.
+		// A silently downgraded load is the failure this project exists to avoid.
 		"--fit", "off",
 
 		"-ngl", strconv.Itoa(rt.NumGPU),
@@ -36,10 +31,8 @@ func Args(rt config.Runtime, port int) []string {
 		"-c", strconv.Itoa(rt.NumCtx),
 	}
 
-	// llama-server answers /v1/embeddings with "This server does not support
-	// embeddings" unless it was started for it, and refuses generation when it
-	// was. There is no process that does both, which is why this is part of the
-	// runtime rather than a per-request flag.
+	// llama-server serves /v1/embeddings only when started for it and then refuses
+	// generation, so this is part of the runtime.
 	if rt.Embedding {
 		args = append(args, "--embeddings")
 	}
@@ -57,27 +50,21 @@ func Args(rt config.Runtime, port int) []string {
 		args = append(args, "--cache-type-v", rt.CacheTypeV)
 	}
 
-	// Deliberate CPU placement, not the spill --fit off exists to prevent: the
-	// offload line these do not move is still required to read N/N.
+	// Deliberate CPU placement, not the spill --fit off prevents.
 	if rt.NumCPUMoE > 0 {
 		args = append(args, "--n-cpu-moe", strconv.Itoa(rt.NumCPUMoE))
 	}
-	// One comma-separated flag, not one flag per pattern: llama.cpp still appends
-	// a repeated --override-tensor, but its parser warns that it is deprecated
-	// and that only the last value counts, and that warning is picked up as a
-	// notable line in every load diagnosis.
+	// One comma-separated flag, since repeating --override-tensor makes llama.cpp warn
+	// that only the last value counts, which every load diagnosis would pick up.
 	if rt.OverrideTensor != "" {
 		args = append(args, "--override-tensor", rt.OverrideTensor)
 	}
-	// Each RPC endpoint is another device the layer split can land on, so this
-	// needs no --split-mode: llama.cpp already splits by layer across whatever
-	// devices are present.
+	// Each RPC endpoint is another device for llama.cpp's default layer split, so
+	// no --split-mode is needed.
 	if rt.RPCServers != "" {
 		args = append(args, "--rpc", rt.RPCServers)
 	}
 
-	// Unset passes nothing, so llama.cpp keeps using every device it sees with
-	// its default layer split.
 	if rt.Device != "" {
 		args = append(args, "--device", rt.Device)
 	}
@@ -94,8 +81,8 @@ func Args(rt config.Runtime, port int) []string {
 		args = append(args, "--no-kv-offload")
 	}
 
-	// PR #27861, unmerged: a build without it exits on the unknown flag rather
-	// than ignoring it, which is why nothing is passed unless asked for.
+	// PR #27861, unmerged: a build without it exits on the unknown flag, so nothing
+	// is passed unless asked for.
 	if rt.MoEExpertCache > 0 {
 		args = append(args, "--moe-expert-cache", strconv.Itoa(rt.MoEExpertCache))
 		if rt.MoEExpertCacheInserts > 0 {
@@ -103,9 +90,8 @@ func Args(rt config.Runtime, port int) []string {
 		}
 	}
 
-	// Streaming the KV cache through a fixed VRAM arena is what lets a context
-	// larger than the card run at all. It only covers the target context: an MTP
-	// draft cache is not streamed and still needs its own VRAM.
+	// Streaming KV through a fixed VRAM arena lets a context larger than the card
+	// run. It only covers the target context, not an MTP draft cache.
 	if rt.KVStreamArenaMiB > 0 {
 		args = append(args, "--kv-stream-arena-mib", strconv.Itoa(rt.KVStreamArenaMiB))
 	}
@@ -120,9 +106,7 @@ func Args(rt config.Runtime, port int) []string {
 		}
 	}
 
-	// The vision projector reserves over a gigabyte of VRAM whether or not any
-	// request uses it, which on a 16 GB card is often the difference between
-	// fitting and spilling.
+	// The vision projector reserves over a gigabyte of VRAM whether or not a request uses it.
 	if rt.ProjectorPath != "" {
 		args = append(args, "--mmproj", rt.ProjectorPath)
 	} else {

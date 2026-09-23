@@ -13,31 +13,24 @@ import (
 	"github.com/oswald/alpakka/internal/gguf"
 )
 
-// DirStore reads plain GGUF files laid out as <root>/<name>/<tag>.gguf.
-//
-// The sibling <tag>.mmproj.gguf is the vision projector, and a model split by
-// llama.cpp keeps its <tag>-00001-of-0000N.gguf naming. A name may nest, so
-// <root>/unsloth/qwen3.8-27b/iq3-xxs.gguf is "unsloth/qwen3.8-27b:iq3-xxs".
+// Layout is <root>/<name>/<tag>.gguf and a name may nest. A sibling <tag>.mmproj.gguf is
+// the vision projector, and llama.cpp splits keep their <tag>-00001-of-0000N.gguf naming.
 type DirStore struct {
 	root  string
 	cache *ggufCache
 }
 
-// NewDir opens the directory store rooted at dir.
 func NewDir(root string) *DirStore {
 	return &DirStore{root: root, cache: newGGUFCache()}
 }
 
-// Root returns the store's root directory.
 func (s *DirStore) Root() string { return s.root }
 
-// tagFiles is the set of files that make up one <name>:<tag>.
 type tagFiles struct {
-	parts     []string // weights in split order; one entry when not split
+	parts     []string
 	projector string
 }
 
-// List returns every model in the store, newest first.
 func (s *DirStore) List() ([]Model, error) {
 	dirs, err := s.scan()
 	if err != nil {
@@ -49,9 +42,8 @@ func (s *DirStore) List() ([]Model, error) {
 		for _, tag := range sortedKeys(dirs[name]) {
 			m, err := s.model(name, tag, dirs[name][tag])
 			if err != nil {
-				// A GGUF that will not parse is not a model. Dropping it keeps
-				// a half-written download out of the listing instead of
-				// failing every /api/tags on the machine.
+				// A GGUF that will not parse is not a model, and dropping it keeps a half-written
+				// download out of /api/tags.
 				continue
 			}
 			models = append(models, *m)
@@ -62,7 +54,6 @@ func (s *DirStore) List() ([]Model, error) {
 	return models, nil
 }
 
-// Get resolves a model by name. A bare name resolves to its only tag.
 func (s *DirStore) Get(name string) (*Model, error) {
 	repo, want := splitName(name)
 	rel, ok := safeRel(repo)
@@ -90,7 +81,6 @@ func (s *DirStore) Get(name string) (*Model, error) {
 	return s.model(repo, want, files)
 }
 
-// Tags lists the tags stored under a name, sorted.
 func (s *DirStore) Tags(name string) []string {
 	rel, ok := safeRel(name)
 	if !ok {
@@ -103,8 +93,6 @@ func (s *DirStore) Tags(name string) []string {
 	return sortedKeys(tags)
 }
 
-// Path is where the weights of <name>:<tag> belong, whether or not the file
-// exists yet.
 func (s *DirStore) Path(name, tag string) (string, bool) {
 	rel, ok := safeRel(name)
 	if !ok || !safeSegment(tag) {
@@ -113,7 +101,6 @@ func (s *DirStore) Path(name, tag string) (string, bool) {
 	return filepath.Join(s.root, rel, tag+".gguf"), true
 }
 
-// scan walks the whole root, returning tags keyed by model name.
 func (s *DirStore) scan() (map[string]map[string]tagFiles, error) {
 	out := map[string]map[string]tagFiles{}
 
@@ -145,7 +132,6 @@ func (s *DirStore) scan() (map[string]map[string]tagFiles, error) {
 	return out, nil
 }
 
-// scanDir groups one directory's GGUF files into tags.
 func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -173,13 +159,11 @@ func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
 
 		parsed := ParseGGUFName(e.Name())
 		if parsed.Draft {
-			// A draft model is not servable on its own; serving one answers
-			// with the draft's own output instead of the model's.
+			// A draft model is not servable on its own, serving one answers with the draft's output.
 			continue
 		}
 		if parsed.Projector {
-			// Publishers ship F32 beside F16; the larger is the better one and
-			// costs nothing at this size.
+			// Publishers ship F32 beside F16, and the larger is better at no cost at this size.
 			if info, err := e.Info(); err == nil && (loose == "" || info.Size() > looseSize) {
 				loose, looseSize = full, info.Size()
 			}
@@ -190,8 +174,8 @@ func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
 		if parsed.Parts > 0 {
 			stem, _, _ = splitPart(base)
 		}
-		// A file still under its publisher's name is tagged by its quant, so a
-		// directory of downloads reads without having to be renamed first.
+		// A file still under its publisher's name is tagged by its quant, so downloads
+		// read without being renamed.
 		tag := stem
 		if _, taken := out[parsed.Tag]; parsed.Tag != "" && !taken {
 			tag = parsed.Tag
@@ -213,7 +197,6 @@ func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
 		out[tag] = f
 	}
 	for tag, f := range out {
-		// A projector with no weights beside it is not a model.
 		if len(f.parts) == 0 {
 			delete(out, tag)
 			continue
@@ -255,15 +238,13 @@ func (s *DirStore) model(name, tag string, files tagFiles) (*Model, error) {
 		return nil, err
 	}
 	m.Config = ggufConfig(f)
-	// llama.cpp runs with --jinja and reads this out of the GGUF itself. It is
-	// carried here only so /api/show can render a Modelfile.
+	// llama.cpp reads the template from the GGUF itself. It is carried here only so
+	// /api/show can render a Modelfile.
 	m.Template, _ = f.String("tokenizer.chat_template")
 	m.Digest = headerDigest(m.Name, m.Size, f)
 	return m, nil
 }
 
-// ggufConfig fills in what ollama would have read from its config blob, so
-// Details reports the same shape whichever source a model came from.
 func ggufConfig(f *gguf.File) Config {
 	cfg := Config{ModelFormat: "gguf", FileType: "unknown"}
 	if arch := f.Architecture(); arch != "" {
@@ -277,12 +258,8 @@ func ggufConfig(f *gguf.File) Config {
 	return cfg
 }
 
-// headerDigest is the stable id /api/tags needs, not a content address.
-//
-// Clients key their caches on it, so it has to survive a restart and change
-// when the weights are replaced. The metadata header pins the architecture,
-// the quantization and the tokenizer; with the size and the name beside it
-// that separates every model a store can hold, without hashing twelve gigabytes.
+// Clients key caches on it, so it must survive restarts and change when weights are
+// replaced. The metadata header, size and name separate every model without hashing gigabytes.
 func headerDigest(name string, size int64, f *gguf.File) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s\x00%d\x00", name, size)
@@ -292,8 +269,7 @@ func headerDigest(name string, size int64, f *gguf.File) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// partWidth, partMarker and partSuffix describe llama.cpp's split naming,
-// e.g. "iq3-xxs-00002-of-00003".
+// llama.cpp's split naming, e.g. "iq3-xxs-00002-of-00003".
 const (
 	partWidth  = 5
 	partMarker = "-of-"
@@ -320,8 +296,7 @@ func splitPart(base string) (tag string, part int, ok bool) {
 	return base[:len(base)-partSuffix], part, true
 }
 
-// splitName separates "ns/name:tag" into repo and tag, leaving a colon in a
-// registry host alone.
+// Leaves a colon in a registry host alone.
 func splitName(name string) (string, string) {
 	p := path(name)
 	i := strings.LastIndex(p, ":")
@@ -332,8 +307,7 @@ func splitName(name string) (string, string) {
 	return name[:off+i], name[off+i+1:]
 }
 
-// safeRel turns a model name into a path under the root. The name arrives from
-// an HTTP request, so it must not be able to point anywhere else.
+// The name arrives from an HTTP request, so it must not point anywhere else.
 func safeRel(name string) (string, bool) {
 	if name == "" {
 		return "", false
@@ -351,7 +325,6 @@ func safeSegment(s string) bool {
 	return s != "" && s != "." && s != ".." && !strings.ContainsAny(s, `/\`)
 }
 
-// sortNewestFirst is the order /api/tags is expected in.
 func sortNewestFirst(models []Model) {
 	sort.Slice(models, func(i, j int) bool {
 		return models[i].ModifiedAt.After(models[j].ModifiedAt)

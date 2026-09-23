@@ -60,7 +60,6 @@ func importModels(args []string) error {
 			logger.Printf("link %s -> %s", l.From, l.To)
 		}
 		if *apply {
-			// One model that cannot be linked should not cost the rest.
 			if err := a.Link(); err != nil {
 				logger.Printf("failed %v", err)
 				failed++
@@ -84,8 +83,6 @@ func importModels(args []string) error {
 	return nil
 }
 
-// ollamaRoot is the first configured root in ollama's layout, falling back to
-// where ollama keeps it by default.
 func ollamaRoot(cfg config.Config) string {
 	for _, root := range cfg.Store.Roots {
 		if info, err := os.Stat(filepath.Join(root, "manifests")); err == nil && info.IsDir() {

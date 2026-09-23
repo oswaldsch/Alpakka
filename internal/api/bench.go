@@ -14,11 +14,8 @@ import (
 	"github.com/oswald/alpakka/internal/translate"
 )
 
-// benchRequest is one measurement of one configuration.
-//
-// Options is ollama's options object, so every process-level setting alpakka
-// understands is benchmarkable through the vocabulary it is already configured
-// in, and a setting added there needs nothing here.
+// Options is ollama's options object, so every process-level setting is benchmarkable
+// in its configured vocabulary and a new setting needs nothing here.
 type benchRequest struct {
 	Model        string         `json:"model"`
 	Options      map[string]any `json:"options"`
@@ -32,13 +29,11 @@ type benchRequest struct {
 type benchResponse struct {
 	Model   string         `json:"model"`
 	Options map[string]any `json:"options,omitempty"`
-	// Runtime is what llama-server is actually running, which is not
-	// necessarily what was asked for: a request only reloads settings the
-	// profile does not already carry.
+	// What llama-server is actually running, which may differ from what was asked because
+	// a request only reloads settings the profile does not already carry.
 	Runtime config.Runtime `json:"runtime"`
 	Fit     benchFit       `json:"fit"`
-	// LoadMS is what this request spent getting the process ready. Reloaded
-	// says whether it paid for the load itself, which is the cost a
+	// Reloaded says whether this request paid for the load itself, the cost a
 	// configuration that reloads on every request keeps paying.
 	LoadMS    float64    `json:"load_ms"`
 	Reloaded  bool       `json:"reloaded"`
@@ -47,9 +42,7 @@ type benchResponse struct {
 	Sample    string     `json:"sample"`
 }
 
-// benchRun holds llama.cpp's own timings for one generation. The rates are
-// derived from those and not from wall clock, which would fold in the round
-// trip and the SSE parse.
+// The rates come from llama.cpp's timings, not wall clock, which would fold in the round trip and SSE parse.
 type benchRun struct {
 	PromptTokens  int     `json:"prompt_tokens"`
 	PromptMS      float64 `json:"prompt_ms"`
@@ -115,9 +108,7 @@ func (s *Server) handleBench(w http.ResponseWriter, r *http.Request) {
 	}
 	defer inst.Release()
 
-	// A benchmark needs a token budget it chose, so an unset or unlimited
-	// num_predict becomes a concrete one rather than running to the model's
-	// own stopping point.
+	// A benchmark needs a token budget it chose, so unset or unlimited num_predict becomes a concrete one.
 	if profile.NumPredict == nil || *profile.NumPredict <= 0 {
 		profile.NumPredict = ptr(benchDefaultPredict)
 	}
@@ -135,10 +126,8 @@ func (s *Server) handleBench(w http.ResponseWriter, r *http.Request) {
 	for i := 0; i < runs; i++ {
 		prompt := req.Prompt
 		if prompt == "" {
-			// A fresh prompt per run, and words drawn at random rather than
-			// repeated: predictable filler would let a draft model verify
-			// several tokens a pass and report a decode rate no real workload
-			// reaches.
+			// A fresh prompt of random words per run, since predictable filler lets a draft model verify
+			// several tokens a pass and report a decode rate no real workload reaches.
 			prompt = fillerPrompt(req.PromptTokens, int64(i))
 		}
 		run, sample, err := s.benchOnce(r, inst, profile, prompt, req.IgnoreEOS == nil || *req.IgnoreEOS)
@@ -202,8 +191,7 @@ func (s *Server) benchOnce(r *http.Request, inst *supervisor.Instance, profile c
 		WallMS:        msOf(wall),
 		DoneReason:    chat.DoneReason,
 	}
-	// A reasoning model under ignore_eos never closes its think block, so the
-	// whole generation is thinking and the content is empty.
+	// A reasoning model under ignore_eos never closes its think block, so the content is empty.
 	sample := chat.Message.Content
 	if sample == "" {
 		sample = chat.Message.Thinking
@@ -211,8 +199,7 @@ func (s *Server) benchOnce(r *http.Request, inst *supervisor.Instance, profile c
 	return run, truncate(sample, benchSampleChars), nil
 }
 
-// aggregate pools the runs rather than averaging their rates, so a short run
-// does not weigh as much as a long one.
+// Pools the runs rather than averaging rates, so a short run does not weigh as much as a long one.
 func aggregate(runs []benchRun) benchRun {
 	var total benchRun
 	for _, r := range runs {
@@ -227,9 +214,8 @@ func aggregate(runs []benchRun) benchRun {
 	return total
 }
 
-// benchWords are short, common English words: one BPE token each in the
-// vocabularies this drives, so a word count approximates a token count. The
-// prompt token counts reported back are llama.cpp's own, not this estimate.
+// Short common English words, one BPE token each in the vocabularies this drives, so a word
+// count approximates a token count. Reported prompt token counts are llama.cpp's own.
 var benchWords = strings.Fields(`the of and to in a is that it for on with as at by from
 	but not are was were be have has had do does did will would can could should may
 	one two three four five six seven eight nine ten first last next time year day

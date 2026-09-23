@@ -82,9 +82,7 @@ func pull(args []string) error {
 	return client.Pull(ctx, plan, dest, withProjector, *force)
 }
 
-// wantProjector decides whether to take the repo's mmproj beside the weights.
-// Without a terminal to ask, it is left out: a projector only matters for a
-// vision model, and an unattended pull should not double its own size.
+// An unattended pull leaves the projector out so it does not double its size.
 func wantProjector(mode string, plan *hub.Plan, logger *log.Logger) (bool, error) {
 	switch strings.ToLower(mode) {
 	case "yes", "true":
@@ -111,11 +109,7 @@ func wantProjector(mode string, plan *hub.Plan, logger *log.Logger) (bool, error
 	return answer == "y" || answer == "yes", nil
 }
 
-// onTerminal reports whether there is someone to answer a question.
-//
-// A character device is not enough to go on: /dev/null is one, so a pull run
-// from a script or a unit would print a prompt nobody can see and then take
-// the answer from EOF.
+// /dev/null is a character device, so a script would print an unseen prompt and read EOF.
 func onTerminal() bool {
 	info, err := os.Stdin.Stat()
 	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
@@ -126,9 +120,7 @@ func onTerminal() bool {
 		(strings.HasPrefix(target, "/dev/pts/") || strings.HasPrefix(target, "/dev/tty"))
 }
 
-// writableRoot is the first root that is not an ollama store, which is where
-// a pull lands. Ollama's layout is read-only to alpakka, so it is never a
-// candidate however it is ordered.
+// Ollama's layout is read-only to alpakka, so it is never a candidate.
 func writableRoot(cfg config.Config, override string) (string, error) {
 	if override != "" {
 		return override, nil

@@ -1,5 +1,4 @@
-// Package wol sends Wake-on-LAN magic packets, so a load that offloads onto an
-// RPC node does not need someone to walk over and power the box back on.
+// Package wol sends Wake-on-LAN magic packets.
 package wol
 
 import (
@@ -8,9 +7,7 @@ import (
 	"syscall"
 )
 
-// Wake sends a magic packet for mac to the LAN broadcast address. rpc-server
-// nodes are LAN-only by the same rule --rpc itself is held to, so a broadcast
-// is always in reach.
+// Nodes are LAN-only like --rpc, so a broadcast is always in reach.
 func Wake(mac string) error {
 	hw, err := net.ParseMAC(mac)
 	if err != nil {
@@ -26,8 +23,8 @@ func Wake(mac string) error {
 	}
 	defer conn.Close()
 
-	// Linux refuses sendto on a broadcast address unless SO_BROADCAST is set on
-	// the socket; net.ListenPacket does not set it.
+	// Linux refuses sendto on a broadcast address unless SO_BROADCAST is set, and
+	// net.ListenPacket does not set it.
 	sc, ok := conn.(syscall.Conn)
 	if !ok {
 		return fmt.Errorf("wol: %T does not expose its socket", conn)
@@ -56,8 +53,7 @@ func Wake(mac string) error {
 	return nil
 }
 
-// magicPacket is six 0xFF bytes followed by the target MAC repeated sixteen
-// times, the payload every Wake-on-LAN listener expects.
+// Six 0xFF bytes then the target MAC sixteen times, the payload every listener expects.
 func magicPacket(hw net.HardwareAddr) []byte {
 	packet := make([]byte, 0, 102)
 	for range 6 {

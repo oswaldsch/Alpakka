@@ -179,8 +179,6 @@ func TestDirEmbeddingModelIsDetected(t *testing.T) {
 	}
 }
 
-// The digest is what clients key their caches on, so it has to be the same
-// across restarts and different between models.
 func TestDirDigestIsStableAndDistinct(t *testing.T) {
 	s := dirFixture(t)
 	first, err := s.Get("qwen3.8-27b:iq3-xxs")
@@ -251,7 +249,6 @@ func TestDirSkipsUnparseableFiles(t *testing.T) {
 	}
 }
 
-// A projector on its own is not a model, and must not appear as one.
 func TestDirIgnoresOrphanProjector(t *testing.T) {
 	root := t.TempDir()
 	writeGGUF(t, filepath.Join(root, "orphan", "q4-k-m.mmproj.gguf"), map[string]any{
@@ -276,7 +273,6 @@ func TestDirMissingRootListsNothing(t *testing.T) {
 	}
 }
 
-// The name arrives from an HTTP request, so it must not reach outside the root.
 func TestDirGetRejectsTraversal(t *testing.T) {
 	s := dirFixture(t)
 	for _, name := range []string{

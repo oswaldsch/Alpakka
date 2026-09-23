@@ -1,9 +1,4 @@
-// Package supervisor owns the llama-server child process: launching it with the
-// right flags, deciding when a request needs a different process, and tearing
-// the old one down cleanly.
-//
-// One 16 GB card means one model resident at a time, so there is at most one
-// child alive at any moment.
+// Package supervisor owns the llama-server child process, at most one at a time.
 package supervisor
 
 import (
@@ -22,27 +17,21 @@ import (
 	"github.com/oswald/alpakka/internal/wol"
 )
 
-// Logf receives human-readable supervisor events.
 type Logf func(format string, args ...any)
 
-// Supervisor manages the single llama-server process.
 type Supervisor struct {
 	llama config.Llama
-	// wol maps an RPC endpoint's "host:port" to the MAC address behind it, from
-	// Config.WoL. An endpoint absent here is assumed already running, as every
-	// endpoint was before Wake-on-LAN existed.
+	// An endpoint absent here is assumed already running, as before Wake-on-LAN existed.
 	wol  map[string]string
 	logf Logf
 
-	// LoadTimeout bounds a model load. Thirteen gigabytes off a cold page
-	// cache takes tens of seconds, so this is deliberately generous.
+	// Thirteen gigabytes off a cold page cache takes tens of seconds, so this is generous.
 	LoadTimeout time.Duration
 
 	mu  sync.Mutex
 	cur *Instance
 }
 
-// New creates a supervisor driving the given llama.cpp build.
 func New(llama config.Llama, wolMACs map[string]string, logf Logf) *Supervisor {
 	if logf == nil {
 		logf = func(string, ...any) {}
@@ -50,15 +39,8 @@ func New(llama config.Llama, wolMACs map[string]string, logf Logf) *Supervisor {
 	return &Supervisor{llama: llama, wol: wolMACs, logf: logf, LoadTimeout: 5 * time.Minute}
 }
 
-// Ensure returns a ready instance running exactly rt, starting or replacing the
-// current process if it does not already match.
-//
-// Concurrent callers that want the same runtime share one load: the second
-// caller waits on the same readiness signal instead of starting a rival server.
-//
-// The returned instance carries a reference held on the caller's behalf, so
-// neither the evictor nor a competing reload can stop it. The caller must
-// Release it when the request is done.
+// Concurrent callers wanting the same runtime share one load. The returned
+// instance holds a reference the caller must Release.
 func (s *Supervisor) Ensure(ctx context.Context, rt config.Runtime) (*Instance, error) {
 	for {
 		s.mu.Lock()
@@ -72,17 +54,14 @@ func (s *Supervisor) Ensure(ctx context.Context, rt config.Runtime) (*Instance, 
 			if cur.acquireIfLive() {
 				return cur, nil
 			}
-			// It exited between becoming ready and being claimed; start over.
+			// It exited between becoming ready and being claimed, so start over.
 			continue
 		}
 
 		if cur != nil {
 			s.mu.Unlock()
-			// A process-level flag changed, or a different model was asked for.
-			// Reload rather than silently serving the request with the settings
-			// the previous process happened to have — but not while that
-			// process is still streaming a response, because killing it there
-			// truncates the answer with no error on either side.
+			// Reload rather than serve with the previous process's settings, but not while
+			// it is streaming, since killing it truncates the answer with no error.
 			if cur.busy() {
 				s.logf("%s is busy; waiting for it to finish before reloading", cur.rt.Model)
 			}
@@ -124,7 +103,6 @@ func (s *Supervisor) Ensure(ctx context.Context, rt config.Runtime) (*Instance, 
 	}
 }
 
-// Current returns the running instance, or nil.
 func (s *Supervisor) Current() *Instance {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -134,7 +112,6 @@ func (s *Supervisor) Current() *Instance {
 	return s.cur
 }
 
-// Stop tears down the running instance, if any.
 func (s *Supervisor) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,7 +121,6 @@ func (s *Supervisor) Stop() {
 	}
 }
 
-// EvictExpired stops the running instance if its keep-alive has lapsed.
 func (s *Supervisor) EvictExpired(now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,7 +133,6 @@ func (s *Supervisor) EvictExpired(now time.Time) bool {
 	return true
 }
 
-// RunEvictor evicts expired instances until ctx is cancelled.
 func (s *Supervisor) RunEvictor(ctx context.Context, tick time.Duration) {
 	t := time.NewTicker(tick)
 	defer t.Stop()
@@ -198,20 +173,14 @@ func (s *Supervisor) start(rt config.Runtime) (*Instance, error) {
 	inst.idle = sync.NewCond(&inst.mu)
 
 	args := Args(rt, port)
-	// exec.Command runs the binary directly — no shell, so there is no wrapper
-	// process to absorb the eventual kill and leave the real server holding the
-	// port and the card.
+	// No shell: a wrapper process would absorb the kill and leave the real server
+	// holding the port and the card.
 	cmd := exec.Command(llama.Binary(), args...)
-	// ggml resolves libggml-hip.so relative to the executable's directory and
-	// the working directory. Without this the server comes up on CPU at a few
-	// tokens a second and reports no error at all.
+	// ggml resolves libggml-hip.so from the executable and working directories,
+	// otherwise the server silently runs on CPU.
 	cmd.Dir = llama.BackendDir()
-	// Its own process group, so teardown can signal any grandchildren too.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	// A plain writer rather than StderrPipe: os/exec closes a pipe as soon as
-	// Wait returns, which races the reader and can swallow the very lines that
-	// explain a fast crash. With a writer, Wait waits for the copy to drain.
 	cmd.Stderr = &stderrWriter{inst: inst}
 	cmd.Stdout = nil
 
@@ -222,9 +191,8 @@ func (s *Supervisor) start(rt config.Runtime) (*Instance, error) {
 	inst.cmd = cmd
 
 	if rt.RPCServers != "" {
-		// The RPC node this depends on stays reachable only as long as this
-		// machine's network does, so a suspend here would silently stall every
-		// request the node is carrying.
+		// The RPC node stays reachable only while this machine's network does, so a
+		// suspend would silently stall its requests.
 		inh, err := startInhibitor(rt.Model)
 		if err != nil {
 			s.logf("starting sleep inhibitor for %s: %v", rt.Model, err)
@@ -239,10 +207,8 @@ func (s *Supervisor) start(rt config.Runtime) (*Instance, error) {
 	return inst, nil
 }
 
-// wakeRPCNodes sends a Wake-on-LAN magic packet to every endpoint in addrs (a
-// comma-joined rpc_servers list) that has a MAC configured. It does not wait
-// for a node to come up: llama-server's own connection failure already
-// explains a load that hits an endpoint still booting.
+// Does not wait for a node to boot, since llama-server's connection failure
+// already explains that.
 func (s *Supervisor) wakeRPCNodes(addrs string) {
 	for _, addr := range strings.Split(addrs, ",") {
 		mac, ok := s.wol[addr]
@@ -257,9 +223,7 @@ func (s *Supervisor) wakeRPCNodes(addrs string) {
 	}
 }
 
-// freePort asks the kernel for an unused port. The gap between closing this
-// listener and llama-server binding is small enough to be acceptable, and a
-// collision surfaces immediately as a failed start rather than silently.
+// The gap before llama-server binds is small, and a collision fails the start immediately.
 func freePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -334,6 +298,5 @@ func describeChange(old, new config.Runtime) string {
 
 var errStopped = errors.New("llama-server stopped")
 
-// httpClient is used for readiness probes only; generation uses its own client
-// with no timeout.
+// Readiness probes only, generation uses its own client with no timeout.
 var httpClient = &http.Client{Timeout: 2 * time.Second}

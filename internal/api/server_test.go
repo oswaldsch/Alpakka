@@ -15,9 +15,7 @@ import (
 	"github.com/oswald/alpakka/internal/supervisor"
 )
 
-// testServer builds a server over the real model store. Only endpoints that do
-// not need a loaded model are exercised here; the supervisor is covered by its
-// own tests against a real llama-server.
+// Only endpoints that need no loaded model are exercised, the supervisor has its own tests.
 func testServer(t *testing.T) http.Handler {
 	t.Helper()
 	h := bareServer(t)
@@ -28,8 +26,6 @@ func testServer(t *testing.T) http.Handler {
 	return h
 }
 
-// bareServer builds a server without requiring any model to be pulled, for the
-// endpoints whose behaviour does not depend on the store's contents.
 func bareServer(t *testing.T) http.Handler {
 	t.Helper()
 	root := store.DefaultRoot()
@@ -58,8 +54,7 @@ func do(t *testing.T, h http.Handler, method, path, body string) *httptest.Respo
 	return w
 }
 
-// Go's mux panics on conflicting route patterns, so building the handler at all
-// is a real check.
+// Go's mux panics on conflicting route patterns, so building the handler at all is a check.
 func TestHandlerRoutesDoNotConflict(t *testing.T) {
 	if testServer(t) == nil {
 		t.Fatal("nil handler")
@@ -111,13 +106,13 @@ func TestShowUnknownModelMatchesOllama(t *testing.T) {
 	}
 	var e map[string]string
 	_ = json.Unmarshal(w.Body.Bytes(), &e)
-	// Ollama's exact wording; clients match on it.
+	// Ollama's exact wording, since clients match on it.
 	if e["error"] != "model 'definitely-absent' not found" {
 		t.Errorf("error = %q", e["error"])
 	}
 }
 
-// /api/ps must be a well-formed empty list when nothing is loaded, not null.
+// Must be a well-formed empty list when nothing is loaded, not null.
 func TestPSEmptyWhenNothingLoaded(t *testing.T) {
 	w := do(t, testServer(t), http.MethodGet, "/api/ps", "")
 	if !strings.Contains(w.Body.String(), `"models":[]`) {
@@ -138,7 +133,6 @@ func TestWriteEndpointsAreRefusedClearly(t *testing.T) {
 	}
 }
 
-// A bad option must be rejected before a slow model load, not after.
 func TestInvalidReasoningEffortIsRejected(t *testing.T) {
 	w := do(t, testServer(t), http.MethodPost, "/api/chat",
 		`{"model":"qwen3:0.6b","messages":[],"options":{"reasoning_effort":"high"}}`)
@@ -184,8 +178,6 @@ func TestFormatParametersMatchesOllamaLayout(t *testing.T) {
 	}
 }
 
-// Without a preflight answer the mux replies 405 and a browser reports an
-// opaque CORS failure, which is every browser-based ollama client.
 func TestPreflightIsAnswered(t *testing.T) {
 	h := bareServer(t)
 	r := httptest.NewRequest(http.MethodOptions, "/api/chat", nil)
@@ -222,7 +214,6 @@ func TestCORSAllowsLocalAndAppOriginsOnly(t *testing.T) {
 		}
 	}
 
-	// A configured list replaces the default entirely.
 	s.Config.Server.Origins = []string{"https://chat.example"}
 	if s.originAllowed("http://localhost:3000") {
 		t.Error("a configured list should not still allow localhost")
@@ -232,7 +223,6 @@ func TestCORSAllowsLocalAndAppOriginsOnly(t *testing.T) {
 	}
 }
 
-// A normal response carries the headers too, not just the preflight.
 func TestCORSHeadersOnRealResponses(t *testing.T) {
 	h := bareServer(t)
 	r := httptest.NewRequest(http.MethodGet, "/api/version", nil)

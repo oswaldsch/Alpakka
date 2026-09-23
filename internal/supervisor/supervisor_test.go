@@ -14,9 +14,7 @@ import (
 	"github.com/oswald/alpakka/internal/store"
 )
 
-// testLlama locates a llama.cpp build to drive. The environment overrides come
-// first so these tests can run against a hand-installed build rather than only
-// the one ollama ships.
+// Env overrides come first so tests can run against a hand-installed build.
 func testLlama(t *testing.T) config.Llama {
 	t.Helper()
 	candidates := []config.Llama{}
@@ -44,7 +42,6 @@ func testLlama(t *testing.T) config.Llama {
 	return config.Llama{}
 }
 
-// smallModel resolves a model small enough to load repeatedly in a test.
 func smallModel(t *testing.T) *store.Model {
 	t.Helper()
 	root := store.DefaultRoot()
@@ -109,9 +106,6 @@ func TestWakeRPCNodesSkipsUnconfiguredAddresses(t *testing.T) {
 	}
 }
 
-// TestEnsureLoadsAndServes is the end-to-end supervisor check: a real
-// llama-server comes up, the fit check reads a real offload line, and the
-// process is really gone afterwards.
 func TestEnsureLoadsAndServes(t *testing.T) {
 	llama := testLlama(t)
 	m := smallModel(t)
@@ -130,8 +124,7 @@ func TestEnsureLoadsAndServes(t *testing.T) {
 		t.Fatalf("Ensure: %v", err)
 	}
 
-	// The fit check is only meaningful if llama-server actually printed the
-	// offload line at the verbosity the supervisor asks for.
+	// The fit check needs llama-server to print the offload line at the supervisor's verbosity.
 	fit := inst.Fit()
 	if !fit.Seen {
 		t.Errorf("no offload line seen at -lv %s; the fit check would be blind.\n%s",
@@ -143,7 +136,6 @@ func TestEnsureLoadsAndServes(t *testing.T) {
 
 	pid := inst.cmd.Process.Pid
 
-	// The same runtime must reuse the process rather than reload.
 	again, err := s.Ensure(ctx, rt)
 	if err != nil {
 		t.Fatal(err)
@@ -153,11 +145,9 @@ func TestEnsureLoadsAndServes(t *testing.T) {
 	}
 	again.Release()
 
-	// The reload below must wait for this instance to be idle, so give the
-	// reference back before asking for a different runtime.
+	// Give the reference back, since the reload must wait for the instance to be idle.
 	inst.Release()
 
-	// A changed process-level flag must reload rather than silently continue.
 	rt2 := config.Profile{NumCtx: intptr(2048)}.Runtime(m.Name, m.ModelPath, "", false)
 	inst2, err := s.Ensure(ctx, rt2)
 	if err != nil {
@@ -171,8 +161,7 @@ func TestEnsureLoadsAndServes(t *testing.T) {
 		t.Errorf("reloaded with num_ctx = %d", inst2.Runtime().NumCtx)
 	}
 
-	// Trap: a kill that hits a wrapper leaves the real server holding the port
-	// and the VRAM. Verify the original process is genuinely gone.
+	// Trap: a kill that hits a wrapper leaves the real server holding the port and VRAM.
 	if alive(pid) {
 		t.Errorf("process %d survived the reload", pid)
 	}
@@ -201,14 +190,13 @@ func TestEnsureFailsCleanlyOnMissingModel(t *testing.T) {
 	}
 }
 
-// alive reports whether a pid is a live process rather than a reaped zombie.
 func alive(pid int) bool {
 	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
 		return false
 	}
-	// /proc/<pid>/stat: pid, (comm), state, ...  comm can contain spaces, so
-	// the state field is read from after the closing parenthesis.
+	// /proc/<pid>/stat is pid, (comm), state. comm can contain spaces, so the
+	// state is read after the closing parenthesis.
 	i := strings.LastIndex(string(b), ")")
 	if i < 0 {
 		return false
@@ -226,16 +214,13 @@ func TestArgsAsksForEmbeddingsOnlyForEmbeddingModels(t *testing.T) {
 	if strings.Contains(chat, "--embeddings") {
 		t.Errorf("a chat model was started for embeddings: %s", chat)
 	}
-	// Without this flag llama-server answers /v1/embeddings with "This server
-	// does not support embeddings", so /api/embed could never work.
+	// Without this llama-server rejects /v1/embeddings, so /api/embed could never work.
 	embed := strings.Join(Args(config.Profile{}.Runtime("m", "/blob", "", true), 1), " ")
 	if !strings.Contains(embed, "--embeddings") {
 		t.Errorf("an embedding model was started without --embeddings: %s", embed)
 	}
 }
 
-// A request in flight must pin the process: evicting underneath a live
-// generation truncates the response instead of erroring.
 func TestBusyInstanceIsNotEvicted(t *testing.T) {
 	i := &Instance{log: newRing(4), notable: newRing(4)}
 	i.idle = sync.NewCond(&i.mu)
@@ -265,7 +250,6 @@ func TestBusyInstanceIsNotEvicted(t *testing.T) {
 	}
 }
 
-// waitIdle is what makes a reload wait rather than kill a live response.
 func TestWaitIdleBlocksUntilReleased(t *testing.T) {
 	i := &Instance{log: newRing(4), notable: newRing(4)}
 	i.idle = sync.NewCond(&i.mu)
@@ -293,7 +277,6 @@ func TestWaitIdleBlocksUntilReleased(t *testing.T) {
 	}
 }
 
-// A caller that gives up must not leave a reload waiting forever.
 func TestWaitIdleHonoursContext(t *testing.T) {
 	i := &Instance{log: newRing(4), notable: newRing(4)}
 	i.idle = sync.NewCond(&i.mu)
@@ -306,7 +289,6 @@ func TestWaitIdleHonoursContext(t *testing.T) {
 	}
 }
 
-// An unverifiable fit is a failure, not a pass: the check is the whole point.
 func TestCheckFitFailsWhenTheOffloadLineIsMissing(t *testing.T) {
 	i := &Instance{log: newRing(4), notable: newRing(4)}
 	if err := i.checkFit(); err == nil {
@@ -334,8 +316,6 @@ func TestCheckFitPermitsOnlyExplicitBoundedPartialOffload(t *testing.T) {
 	}
 }
 
-// Every line the child wrote must be filed before it is marked dead, or the
-// diagnosis for a fast crash comes back empty.
 func TestStderrWriterSplitsAcrossWrites(t *testing.T) {
 	i := &Instance{log: newRing(10), notable: newRing(10)}
 	w := &stderrWriter{inst: i}
@@ -351,13 +331,11 @@ func TestStderrWriterSplitsAcrossWrites(t *testing.T) {
 	}
 }
 
-// The KV cache is resident VRAM the model file size does not account for.
 func TestKVBufferIsSummedPerBackendAtItsMaximum(t *testing.T) {
 	i := &Instance{log: newRing(10), notable: newRing(10)}
 	for _, line := range []string{
 		"llama_kv_cache:      ROCm0 KV buffer size =   512.00 MiB",
 		"llama_kv_cache:        CPU KV buffer size =    64.00 MiB",
-		// A second fitting pass repeats the line; it must not double-count.
 		"llama_kv_cache:      ROCm0 KV buffer size =   512.00 MiB",
 	} {
 		i.observe(line)
@@ -374,15 +352,14 @@ func TestParseVRAMKiBSumsDRMClients(t *testing.T) {
 	}
 }
 
-// llama.cpp's OpenAI embedding endpoint rejects pooling "none", which is what a
-// causal model defaults to, so the flag has to reach the command line.
+// llama.cpp's OpenAI embedding endpoint rejects pooling "none", the causal
+// default, so the flag has to reach the command line.
 func TestArgsCarriesPooling(t *testing.T) {
 	rt := config.Profile{Pooling: strptr("last")}.Runtime("m", "/blob", "", true)
 	got := strings.Join(Args(rt, 1), " ")
 	if !strings.Contains(got, "--pooling last") {
 		t.Errorf("args missing --pooling last: %s", got)
 	}
-	// Left unset, the model's own choice stands.
 	bare := strings.Join(Args(config.Profile{}.Runtime("m", "/blob", "", true), 1), " ")
 	if strings.Contains(bare, "--pooling") {
 		t.Errorf("pooling forced when unset: %s", bare)
@@ -395,16 +372,12 @@ func TestArgsCarriesKVStreamArena(t *testing.T) {
 	if !strings.Contains(got, "--kv-stream-arena-mib 2048") {
 		t.Errorf("args missing --kv-stream-arena-mib 2048: %s", got)
 	}
-	// Unset, llama.cpp keeps the whole cache in VRAM as it always has.
 	bare := strings.Join(Args(config.Profile{}.Runtime("m", "/blob", "", false), 1), " ")
 	if strings.Contains(bare, "--kv-stream-arena-mib") {
 		t.Errorf("kv stream arena passed when unset: %s", bare)
 	}
 }
 
-// Several patterns go in one comma-separated flag. Repeating the flag also
-// works, but llama.cpp's parser warns that it is deprecated, and that warning
-// lands in every load diagnosis.
 func TestArgsJoinsOverrideTensorIntoOneFlag(t *testing.T) {
 	rt := config.Profile{
 		NumCPUMoE:      intptr(12),
@@ -434,8 +407,6 @@ func TestArgsJoinsOverrideTensorIntoOneFlag(t *testing.T) {
 	}
 }
 
-// The flags come from an unmerged draft, so a build without them must not see
-// them at all.
 func TestArgsCarriesMoEExpertCacheOnlyWhenEnabled(t *testing.T) {
 	rt := config.Profile{
 		MoEExpertCache:        intptr(8),

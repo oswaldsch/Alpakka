@@ -17,8 +17,7 @@ import (
 	"github.com/oswald/alpakka/internal/translate"
 )
 
-// upstream carries generation requests to llama-server. Generation has no
-// meaningful timeout: a long completion at 25 tokens a second is normal.
+// Generation has no meaningful timeout, since a long completion at 25 tokens a second is normal.
 var upstream = &http.Client{}
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
@@ -32,14 +31,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeResolveError(w, req.Model, err)
 		return
 	}
-	// The instance is pinned until this returns, so neither the evictor nor a
-	// request for another model can kill the process mid-stream.
+	// The instance is pinned until this returns, so nothing can kill the process mid-stream.
 	defer inst.Release()
 
 	stream := req.Stream == nil || *req.Stream
-	// llama-server is always asked to stream, even when the client wants a
-	// single response. Collecting a stream is one well-tested code path;
-	// supporting both of llama-server's response shapes would be two.
+	// llama-server is always asked to stream. Collecting a stream is one well-tested path,
+	// and supporting both response shapes would be two.
 	body := translate.BuildRequest(inst.Runtime().Model,
 		translate.FromOllamaMessages(req.Messages), profile, true)
 	body.Tools = req.Tools
@@ -90,13 +87,11 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 		writeResolveError(w, req.Model, err)
 		return
 	}
-	// The instance is pinned until this returns, so neither the evictor nor a
-	// request for another model can kill the process mid-stream.
+	// The instance is pinned until this returns, so nothing can kill the process mid-stream.
 	defer inst.Release()
 
-	// /api/generate is a single-turn chat. Sending it through the chat endpoint
-	// keeps the model's own template — and reasoning_effort — in play, which a
-	// raw completion would bypass.
+	// /api/generate is a single-turn chat, and the chat endpoint keeps the model's template and
+	// reasoning_effort in play, which a raw completion would bypass.
 	msgs := []translate.Message{}
 	if req.System != "" {
 		msgs = append(msgs, translate.Message{Role: "system", Content: req.System})
@@ -145,9 +140,6 @@ func (s *Server) handleGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// startNDJSON prepares an ollama streaming response and returns a writer that
-// emits one JSON object per line, flushed immediately so clients see tokens as
-// they are produced.
 func startNDJSON(w http.ResponseWriter) func(any) error {
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-store")
@@ -167,7 +159,6 @@ func startNDJSON(w http.ResponseWriter) func(any) error {
 	}
 }
 
-// applyThink maps ollama's think field onto the jinja template's kwargs.
 func applyThink(body *translate.Request, think *api.ThinkValue) {
 	if think == nil || !think.IsValid() {
 		return
@@ -179,9 +170,8 @@ func applyThink(body *translate.Request, think *api.ThinkValue) {
 		body.ChatTemplateKwargs["enable_thinking"] = think.Bool()
 		return
 	}
-	// A string think value is a reasoning effort. "high" is not a value the
-	// Qwen3.8 template accepts; it silently becomes xhigh, so alpakka does that
-	// mapping openly rather than letting the template do it quietly.
+	// A string think value is a reasoning effort. The Qwen3.8 template silently turns "high"
+	// into xhigh, so alpakka maps it openly.
 	effort := think.String()
 	if effort == "high" {
 		effort = "xhigh"
@@ -189,7 +179,6 @@ func applyThink(body *translate.Request, think *api.ThinkValue) {
 	translate.SetReasoningEffort(body.ChatTemplateKwargs, effort)
 }
 
-// applyFormat maps ollama's format field onto an OpenAI response_format.
 func applyFormat(body *translate.Request, format json.RawMessage) {
 	if len(format) == 0 {
 		return
@@ -201,7 +190,6 @@ func applyFormat(body *translate.Request, format json.RawMessage) {
 		}
 		return
 	}
-	// Anything else is a JSON schema.
 	body.ResponseFormat = json.RawMessage(
 		`{"type":"json_schema","json_schema":{"name":"response","strict":true,"schema":` +
 			string(format) + `}}`)
@@ -215,8 +203,7 @@ func imageParts(text string, images []api.ImageData) []map[string]any {
 	return nil
 }
 
-// post sends a translated request upstream, propagating cancellation so a
-// client hanging up stops the generation.
+// Propagates cancellation so a client hanging up stops the generation.
 func (s *Server) post(r *http.Request, url string, body any) (*http.Response, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -230,14 +217,12 @@ func (s *Server) post(r *http.Request, url string, body any) (*http.Response, er
 	return upstream.Do(req)
 }
 
-// relayUpstreamError forwards a llama-server error rather than inventing one.
 func relayUpstreamError(w http.ResponseWriter, resp *http.Response) {
 	e := upstreamError(resp)
 	writeError(w, e.status, e.Error())
 }
 
-// errUpstream carries a llama-server failure back through a call chain that
-// cannot write the response itself, keeping the status llama-server chose.
+// Carries a llama-server failure through a call chain that cannot write the response, keeping its status.
 type errUpstream struct {
 	status int
 	msg    string
@@ -271,8 +256,7 @@ func sortedKeys[V any](m map[string]V) []string {
 
 func errorsAs(err error, target any) bool { return errors.As(err, target) }
 
-// modelfile renders the Modelfile `ollama show --modelfile` would print, which
-// is what the benchmark harness greps to resolve a model's blob path.
+// The benchmark harness greps this to resolve a model's blob path.
 func modelfile(m *store.Model) string {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "# Modelfile generated by \"alpakka show\"\n")
@@ -298,7 +282,6 @@ func modelfile(m *store.Model) string {
 	return b.String()
 }
 
-// modelInfo renders the GGUF header as /api/show's model_info map.
 func modelInfo(f *gguf.File) map[string]any {
 	out := make(map[string]any, len(f.KV))
 	for k, v := range f.KV {

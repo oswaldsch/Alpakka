@@ -1,10 +1,4 @@
-// Package translate converts between ollama's wire format and the
-// OpenAI-compatible API that llama-server speaks.
-//
-// alpakka never renders a chat template itself. llama-server runs with --jinja
-// and applies the model's own template, because that is the only path on which
-// chat_template_kwargs — and therefore reasoning_effort — exists. That leaves
-// this package with a single job: shape translation.
+// Package translate converts between ollama's wire format and llama-server's OpenAI API.
 package translate
 
 import (
@@ -17,7 +11,6 @@ import (
 	"github.com/oswald/alpakka/internal/config"
 )
 
-// Request is the subset of the OpenAI chat completion body alpakka sends.
 type Request struct {
 	Model    string    `json:"model"`
 	Messages []Message `json:"messages"`
@@ -33,8 +26,7 @@ type Request struct {
 	Stop          []string  `json:"stop,omitempty"`
 	Tools         api.Tools `json:"tools,omitempty"`
 
-	// llama-server accepts the rest of ollama's samplers under these exact
-	// names, so they are forwarded rather than dropped.
+	// llama-server accepts the rest of ollama's samplers under these names, so they are forwarded.
 	Mirostat         *int     `json:"mirostat,omitempty"`
 	MirostatTau      *float32 `json:"mirostat_tau,omitempty"`
 	MirostatEta      *float32 `json:"mirostat_eta,omitempty"`
@@ -44,28 +36,23 @@ type Request struct {
 	TypicalP         *float32 `json:"typical_p,omitempty"`
 	NumKeep          *int     `json:"n_keep,omitempty"`
 
-	// CachePrompt and IgnoreEOS are llama.cpp's own completion parameters, set
-	// only by the benchmark endpoint: reusing a cached prefix would report a
-	// second run's prefill as free, and a model that stops early would measure
-	// decode over a token count the caller did not choose.
+	// Set only by the benchmark endpoint: a cached prefix would make prefill look free
+	// and early stopping would skew decode over a token count the caller did not choose.
 	CachePrompt *bool `json:"cache_prompt,omitempty"`
 	IgnoreEOS   *bool `json:"ignore_eos,omitempty"`
 
 	ResponseFormat json.RawMessage `json:"response_format,omitempty"`
 
-	// ChatTemplateKwargs is llama.cpp's hook into the jinja template. This is
-	// where reasoning_effort goes, and it is the reason alpakka exists.
+	// llama.cpp's hook into the jinja template, where reasoning_effort goes.
 	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
 
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
 }
 
-// StreamOptions asks llama-server for token counts in the final chunk.
 type StreamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
-// Message is an OpenAI chat message.
 type Message struct {
 	Role       string         `json:"role"`
 	Content    any            `json:"content"`
@@ -75,7 +62,6 @@ type Message struct {
 	Extra      map[string]any `json:"-"`
 }
 
-// ToolCall is an OpenAI tool call.
 type ToolCall struct {
 	ID       string `json:"id,omitempty"`
 	Type     string `json:"type,omitempty"`
@@ -86,7 +72,6 @@ type ToolCall struct {
 	} `json:"function"`
 }
 
-// Chunk is one server-sent event from a streaming completion.
 type Chunk struct {
 	Choices []struct {
 		Index        int    `json:"index"`
@@ -95,8 +80,8 @@ type Chunk struct {
 			Role string `json:"role"`
 			// Content is null on the opening chunk, so it is a pointer.
 			Content *string `json:"content"`
-			// llama.cpp emits reasoning_content; ollama's own OpenAI surface
-			// calls the same thing reasoning. Both are accepted.
+			// llama.cpp emits reasoning_content and ollama's OpenAI surface calls it reasoning.
+			// Both are accepted.
 			ReasoningContent *string    `json:"reasoning_content"`
 			Reasoning        *string    `json:"reasoning"`
 			ToolCalls        []ToolCall `json:"tool_calls"`
@@ -113,14 +98,12 @@ type Chunk struct {
 	Timings *Timings `json:"timings"`
 }
 
-// Usage is the OpenAI token accounting.
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 }
 
-// Timings is llama.cpp's timing extension, which carries the durations ollama
-// reports as prompt_eval_duration and eval_duration.
+// llama.cpp's timing extension, the source of ollama's prompt_eval_duration and eval_duration.
 type Timings struct {
 	PromptN     int     `json:"prompt_n"`
 	PromptMS    float64 `json:"prompt_ms"`
@@ -128,9 +111,7 @@ type Timings struct {
 	PredictedMS float64 `json:"predicted_ms"`
 }
 
-// Metrics converts llama.cpp's counters into ollama's. totalDuration is the
-// time spent generating; the load is added because ollama's total_duration
-// covers the whole request.
+// The load is added to totalDuration because ollama's total_duration covers the whole request.
 func (c *Chunk) Metrics(loadDuration, totalDuration time.Duration) api.Metrics {
 	m := api.Metrics{LoadDuration: loadDuration, TotalDuration: loadDuration + totalDuration}
 	if c.Usage != nil {
@@ -154,8 +135,6 @@ func millis(ms float64) time.Duration {
 	return time.Duration(ms * float64(time.Millisecond))
 }
 
-// Text returns the content delta of a chunk, from either the streaming delta or
-// a non-streaming message.
 func (c *Chunk) Text() (content, thinking string) {
 	if len(c.Choices) == 0 {
 		return "", ""
@@ -180,7 +159,6 @@ func (c *Chunk) Text() (content, thinking string) {
 	return content, thinking
 }
 
-// DoneReason maps an OpenAI finish_reason onto ollama's done_reason.
 func DoneReason(finish string) string {
 	switch finish {
 	case "", "stop":
@@ -194,7 +172,6 @@ func DoneReason(finish string) string {
 	}
 }
 
-// BuildRequest turns an ollama-shaped call into an OpenAI one.
 func BuildRequest(model string, msgs []Message, p config.Profile, stream bool) *Request {
 	r := &Request{
 		Model:         model,
@@ -217,7 +194,7 @@ func BuildRequest(model string, msgs []Message, p config.Profile, stream bool) *
 		TypicalP:         p.TypicalP,
 		NumKeep:          p.NumKeep,
 	}
-	// Ollama uses -1 for "no limit"; OpenAI wants the field absent.
+	// Ollama uses -1 for no limit, OpenAI wants the field absent.
 	if p.NumPredict != nil && *p.NumPredict >= 0 {
 		r.MaxTokens = p.NumPredict
 	}
@@ -226,16 +203,14 @@ func BuildRequest(model string, msgs []Message, p config.Profile, stream bool) *
 		SetReasoningEffort(r.ChatTemplateKwargs, *p.ReasoningEffort)
 	}
 	if stream {
-		// Without this the final chunk carries no token counts, and ollama's
-		// clients would see zeroed eval_count fields.
+		// Without this the final chunk carries no token counts and ollama clients see zeroed eval_count.
 		r.StreamOptions = &StreamOptions{IncludeUsage: true}
 	}
 	return r
 }
 
-// FromOllamaMessages converts ollama messages to OpenAI ones. Message.Thinking
-// is never forwarded: OpenAI's message shape has no slot for a historical
-// reasoning block, and the model's own template drops it there too.
+// Message.Thinking is never forwarded: OpenAI's message shape has no slot for historical
+// reasoning and the model's own template drops it there too.
 func FromOllamaMessages(in []api.Message) []Message {
 	out := make([]Message, 0, len(in))
 	for _, m := range in {
@@ -257,7 +232,6 @@ func FromOllamaMessages(in []api.Message) []Message {
 	return out
 }
 
-// contentWithImages renders an ollama message's images as OpenAI content parts.
 func contentWithImages(text string, images []api.ImageData) []map[string]any {
 	parts := []map[string]any{}
 	if text != "" {
@@ -272,17 +246,12 @@ func contentWithImages(text string, images []api.ImageData) []map[string]any {
 	return parts
 }
 
-// dataURL base64-encodes image bytes for an OpenAI image_url part.
 func dataURL(img api.ImageData) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(img)
 }
 
-// SetReasoningEffort puts a reasoning effort into a template's kwargs.
-//
-// "none" is the one value the template does not act on under that name: passing
-// reasoning_effort=none leaves thinking on, and Qwen3.5-9B then spends a whole
-// token budget reasoning without ever answering. enable_thinking=false is what
-// actually turns it off.
+// reasoning_effort=none leaves thinking on and Qwen3.5-9B then spends its whole token
+// budget without answering, so enable_thinking=false is what actually turns it off.
 func SetReasoningEffort(kwargs map[string]any, effort string) {
 	if effort == "none" {
 		kwargs["enable_thinking"] = false

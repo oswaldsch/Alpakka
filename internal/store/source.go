@@ -6,9 +6,6 @@ import (
 	"github.com/oswald/alpakka/internal/gguf"
 )
 
-// Source is a place models are read from. Everything the API layer needs is a
-// listing and a lookup by name; where the bytes live is the implementation's
-// business.
 type Source interface {
 	List() ([]Model, error)
 	Get(name string) (*Model, error)
@@ -16,9 +13,8 @@ type Source interface {
 
 var _ Source = (*Store)(nil)
 
-// ggufCache memoises parsed GGUF headers by file path. A header parse walks the
-// whole tensor table, /api/ps is polled and every request resolves a model, so
-// the same file would otherwise be re-read many times a minute.
+// A header parse walks the whole tensor table, and /api/ps is polled while every
+// request resolves a model, so uncached files would be re-read constantly.
 type ggufCache struct {
 	mu    sync.Mutex
 	files map[string]*gguf.File

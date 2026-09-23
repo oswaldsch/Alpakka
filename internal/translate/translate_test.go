@@ -21,12 +21,9 @@ func fixture(t *testing.T, name string) *os.File {
 	return f
 }
 
-// testLoad stands in for the time Ensure spent getting a server ready. It is
-// never zero in practice, and load_duration is omitempty, so passing zero here
-// would drop a field ollama always sends.
+// load_duration is omitempty and never zero in practice, so zero here would drop a field ollama always sends.
 const testLoad = 137 * time.Millisecond
 
-// collectChat runs a captured llama.cpp stream through the translator.
 func collectChat(t *testing.T, name string) []api.ChatResponse {
 	t.Helper()
 	var got []api.ChatResponse
@@ -40,8 +37,6 @@ func collectChat(t *testing.T, name string) []api.ChatResponse {
 	return got
 }
 
-// jsonKeys lists the field names an object actually serialises, which is what a
-// client sees. Wire bugs live here.
 func jsonKeys(t *testing.T, v any) []string {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -60,7 +55,7 @@ func jsonKeys(t *testing.T, v any) []string {
 	return keys
 }
 
-// ollamaGolden returns the NDJSON captured from the real ollama server.
+// The NDJSON captured from the real ollama server.
 func ollamaGolden(t *testing.T) (first, last map[string]json.RawMessage) {
 	t.Helper()
 	b, err := os.ReadFile("testdata/chat_stream.ndjson")
@@ -77,9 +72,6 @@ func ollamaGolden(t *testing.T) (first, last map[string]json.RawMessage) {
 	return first, last
 }
 
-// TestChatFramingMatchesOllama is the wire-compatibility test: the objects
-// alpakka emits must carry the same field names, in the same places, as the
-// ones a real ollama server emitted for the same kind of request.
 func TestChatFramingMatchesOllama(t *testing.T) {
 	got := collectChat(t, "llama_stream.sse")
 	if len(got) < 2 {
@@ -142,8 +134,7 @@ func TestChatStreamShape(t *testing.T) {
 	}
 }
 
-// Reasoning arrives as reasoning_content from llama.cpp and has to surface as
-// ollama's thinking field.
+// llama.cpp sends reasoning_content, which has to surface as ollama's thinking field.
 func TestThinkingIsTranslated(t *testing.T) {
 	got := collectChat(t, "llama_stream_thinking.sse")
 	var sawThinking bool
@@ -205,8 +196,6 @@ func TestDoneReasonMapping(t *testing.T) {
 	}
 }
 
-// Tool call arguments arrive as JSON fragments across many chunks and only
-// parse once concatenated.
 func TestToolCallsAreReassembled(t *testing.T) {
 	sse := `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"get_weather","arguments":"{\"city\""}}]}}]}
 data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"","arguments":":\"Berlin\"}"}}]}}]}
@@ -225,8 +214,7 @@ data: [DONE]
 		t.Fatalf("got %d chunks, want at least 2", len(got))
 	}
 
-	// Ollama's framing: the tool calls ride on their own chunk, and the final
-	// one carries only done, done_reason and the metrics.
+	// Ollama's framing: tool calls ride on their own chunk and the final one carries only done, done_reason and the metrics.
 	last := got[len(got)-1]
 	if !last.Done || last.DoneReason != "stop" {
 		t.Errorf("final chunk: done=%v done_reason=%q", last.Done, last.DoneReason)

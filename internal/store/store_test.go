@@ -10,11 +10,7 @@ import (
 	"github.com/ollama/ollama/api"
 )
 
-// testStore opens the real ollama store, skipping when it is not usable.
-//
-// An empty store is a skip, not a failure: the directory exists on any machine
-// that has ever run ollama, and these tests compare against models that have
-// actually been pulled.
+// An empty store is a skip, not a failure: the directory exists on any machine that ever ran ollama.
 func testStore(t *testing.T) *Store {
 	t.Helper()
 	root := DefaultRoot()
@@ -32,7 +28,7 @@ func testStore(t *testing.T) *Store {
 	return s
 }
 
-// golden is the /api/tags response captured from the real ollama on :11434.
+// The /api/tags response captured from the real ollama on :11434.
 func golden(t *testing.T) map[string]api.ListModelResponse {
 	t.Helper()
 	b, err := os.ReadFile("testdata/tags.json")
@@ -50,14 +46,8 @@ func golden(t *testing.T) map[string]api.ListModelResponse {
 	return out
 }
 
-// TestListMatchesOllama is the wire-fidelity test for /api/tags: every field
-// alpakka derives from the store must equal what ollama itself reports.
-//
-// It only means anything on the machine tags.json was captured from. Elsewhere
-// the comparison is against another machine's store, where a differing count is
-// expected and modified_at — the manifest's mtime, set when the model was
-// pulled here — can never match. Skipping says that plainly instead of failing
-// for a reason that has nothing to do with the code.
+// Only meaningful on the machine tags.json was captured from. Elsewhere the count and
+// modified_at legitimately differ, so it skips.
 func TestListMatchesOllama(t *testing.T) {
 	s := testStore(t)
 	want := golden(t)
@@ -87,8 +77,7 @@ func TestListMatchesOllama(t *testing.T) {
 		if !g.ModifiedAt.Equal(w.ModifiedAt) {
 			t.Errorf("%s: modified_at = %s, want %s", m.Name, g.ModifiedAt, w.ModifiedAt)
 		}
-		// Compared field by field so the one deliberate divergence below
-		// stays visible rather than being buried in a struct diff.
+		// Compared field by field so the one deliberate divergence stays visible.
 		if g.Details.Format != w.Details.Format ||
 			g.Details.Family != w.Details.Family ||
 			!reflect.DeepEqual(g.Details.Families, w.Details.Families) ||
@@ -98,12 +87,8 @@ func TestListMatchesOllama(t *testing.T) {
 			t.Errorf("%s: details = %+v, want %+v", m.Name, g.Details, w.Details)
 		}
 
-		// context_length and embedding_length are read straight from the GGUF
-		// header. Ollama reports 0 for the gemma4 omni models, whose headers
-		// carry vision.* and audio.* sub-configs its reader does not handle.
-		// Both keys are present and correct, so alpakka reports them; these
-		// fields are omitempty extras that no client behaviour depends on, and
-		// reproducing ollama's gap would be worse than diverging from it.
+		// Ollama reports 0 for these on gemma4 omni models, whose vision.* and audio.* sub-configs
+		// its reader does not handle. alpakka reports the GGUF values, since no client depends on them.
 		if w.Details.ContextLength != 0 && g.Details.ContextLength != w.Details.ContextLength {
 			t.Errorf("%s: context_length = %d, want %d",
 				m.Name, g.Details.ContextLength, w.Details.ContextLength)
@@ -119,7 +104,6 @@ func TestListMatchesOllama(t *testing.T) {
 	}
 }
 
-// TestListSortedNewestFirst matches ollama's ordering.
 func TestListSortedNewestFirst(t *testing.T) {
 	s := testStore(t)
 	got, err := s.List()
@@ -171,13 +155,8 @@ func TestCanonicalName(t *testing.T) {
 	}
 }
 
-// showGolden is /api/show captured from the real ollama for every local model.
-// showGolden is ollama's own answer for every model in the live store, so the
-// comparison is against ollama rather than against alpakka's own output.
-// Recapture it whenever a tag is rebuilt:
-//
-//	for m in $(ollama list | tail -n+2 | cut -f1); do
-//	  curl -s localhost:11434/api/show -d "{\"model\":\"$m\"}"; done
+// Captured from ollama's /api/show for every local model. Recapture when a tag is
+// rebuilt by posting each name from ollama list to localhost:11434/api/show.
 func showGolden(t *testing.T) map[string]struct {
 	Capabilities []string         `json:"capabilities"`
 	Details      api.ModelDetails `json:"details"`
@@ -199,10 +178,8 @@ func showGolden(t *testing.T) map[string]struct {
 	return out
 }
 
-// TestCapabilitiesMatchOllamaShow checks capability detection against ollama's
-// live computation. /api/show is the target rather than /api/tags: tags answers
-// from a cache built at pull time and the two disagree in ollama itself, while
-// show is what clients query before deciding to send tools or request thinking.
+// /api/show is the target rather than /api/tags, since tags answers from a pull-time
+// cache that disagrees with the live computation clients query.
 func TestCapabilitiesMatchOllamaShow(t *testing.T) {
 	s := testStore(t)
 	want := showGolden(t)
@@ -228,8 +205,6 @@ func TestCapabilitiesMatchOllamaShow(t *testing.T) {
 	}
 }
 
-// manifestRel is what makes Get a single open instead of a walk over the whole
-// store, so it has to agree with canonicalName in both directions.
 func TestManifestRelRoundTripsCanonicalName(t *testing.T) {
 	cases := map[string]string{
 		"qwen3:0.6b":           "registry.ollama.ai/library/qwen3/0.6b",
@@ -246,8 +221,7 @@ func TestManifestRelRoundTripsCanonicalName(t *testing.T) {
 		if got != want {
 			t.Errorf("%s -> %s, want %s", name, got, want)
 		}
-		// The path must name the model it came from, or Get would serve the
-		// wrong manifest.
+		// The path must name the model it came from, or Get would serve the wrong manifest.
 		canonical, ok := canonicalName(got)
 		if !ok {
 			t.Errorf("%s: canonicalName rejected %s", name, got)
@@ -263,8 +237,6 @@ func TestManifestRelRoundTripsCanonicalName(t *testing.T) {
 	}
 }
 
-// The model name arrives from an HTTP request, so it must not be able to point
-// the store outside its own directory.
 func TestManifestRelRejectsTraversal(t *testing.T) {
 	for _, name := range []string{
 		"../../../etc/passwd:latest",

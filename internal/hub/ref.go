@@ -6,11 +6,8 @@ import (
 	"strings"
 )
 
-// Ref is a reference to something to pull.
-//
-// Either File names one exact file in the repo, or Quant selects among the
-// repo's GGUFs by quantization. Both empty means the repo has to hold exactly
-// one model for the reference to be unambiguous.
+// Either File names one exact file or Quant selects by quantization. Both empty
+// means the repo must hold exactly one model.
 type Ref struct {
 	Repo     string
 	Revision string
@@ -20,12 +17,7 @@ type Ref struct {
 
 const defaultRevision = "main"
 
-// ParseRef accepts the shapes a GGUF gets copied out of a browser as:
-//
-//	https://huggingface.co/<repo>/blob/main/<file>.gguf
-//	https://huggingface.co/<repo>/resolve/main/<file>.gguf
-//	hf.co/<repo>/<quant>
-//	<repo>:<quant>
+// Accepts huggingface.co blob and resolve URLs as copied from a browser, plus hf.co/<repo>/<quant> and <repo>:<quant>.
 func ParseRef(s string) (Ref, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -54,7 +46,6 @@ func ParseRef(s string) (Ref, error) {
 	ref.Repo = parts[0] + "/" + parts[1]
 	tail := parts[2:]
 
-	// A tag may be written against the repo in any of the forms.
 	if repo, quant, ok := strings.Cut(ref.Repo, ":"); ok {
 		ref.Repo, ref.Quant = repo, normalizeQuant(quant)
 	}
@@ -76,9 +67,7 @@ func ParseRef(s string) (Ref, error) {
 	return ref, nil
 }
 
-// normalizeQuant reduces a quant as written anywhere to the tag form alpakka
-// stores it under, so "UD-IQ3_XXS", "IQ3_XXS" and "iq3-xxs" all select one
-// model.
+// So "UD-IQ3_XXS", "IQ3_XXS" and "iq3-xxs" all select one model.
 func normalizeQuant(s string) string {
 	s = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(s)), ".gguf")
 	s = strings.ReplaceAll(s, "_", "-")

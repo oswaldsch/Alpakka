@@ -2,24 +2,19 @@ package store
 
 import "strings"
 
-// GGUFName is what a GGUF filename says about the model inside it.
-//
-// Publishers name files <model>-<quant>.gguf, so the quant token is the seam:
-// everything before it names the model and everything from it names the tag.
+// Publishers name files <model>-<quant>.gguf, so the quant token splits the model
+// name from the tag.
 type GGUFName struct {
 	Name      string
 	Tag       string
 	Projector bool
 	Draft     bool
-	Part      int // split part number, zero when the file is not split
+	Part      int
 	Parts     int
 }
 
-// ParseGGUFName splits a published GGUF filename into a model name and tag.
-//
-// Unsloth's UD- marker is dropped: it says the quant was made with their
-// dynamic recipe, not which quant it is, and keeping it would give the same
-// quantization two different tags depending on who built it.
+// Unsloth's UD- marker is dropped: it names the recipe, not the quant, and would
+// give one quantization two tags.
 func ParseGGUFName(filename string) GGUFName {
 	base := strings.TrimSuffix(lastSegment(filename), ".gguf")
 
@@ -62,15 +57,13 @@ func ParseGGUFName(filename string) GGUFName {
 	return out
 }
 
-// isDraftName spots a speculation draft shipped beside the model it drafts for.
-// Only "eagle" and "draft" qualify: "mtp" would match qwen3.5-9b-mtp, which is a
-// whole model whose MTP head happens to be built in.
+// Only "eagle" and "draft" qualify, since "mtp" would match qwen3.5-9b-mtp, a whole
+// model with a built-in MTP head.
 func isDraftName(base string) bool {
 	l := strings.ToLower(base)
 	return strings.Contains(l, "eagle") || strings.Contains(l, "draft")
 }
 
-// Slug is the lowercase, hyphenated form a name or tag is stored under.
 func Slug(s string) string { return slug(s) }
 
 func slug(s string) string {
@@ -82,8 +75,6 @@ func slug(s string) string {
 	return s
 }
 
-// isQuantToken recognises the llama.cpp quantization names as they appear in a
-// filename segment: Q8_0, Q4_K_M, IQ3_XXS, TQ1_0, BF16 and the float types.
 func isQuantToken(s string) bool {
 	u := strings.ToUpper(s)
 	switch u {
@@ -99,8 +90,6 @@ func isQuantToken(s string) bool {
 	return false
 }
 
-// partsOf reads the total from a "-00002-of-00003" suffix already matched by
-// splitPart.
 func partsOf(base string) int {
 	tail := base[len(base)-partSuffix:]
 	n := 0

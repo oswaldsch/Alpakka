@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// fakeSource stands in for an ollama store so the test does not need one
-// pulled on the machine.
 type fakeSource []Model
 
 func (f fakeSource) List() ([]Model, error) { return f, nil }
@@ -70,15 +68,13 @@ func TestPlanImportNamesAndPaths(t *testing.T) {
 		}
 	}
 
-	// A namespaced name nests, and the tag is slugged like any other.
 	if got := actions[1].Links[0].To; got != filepath.Join(
 		dest, "hf.co", "unsloth", "qwen3.8-27b-gguf", "q3-k-m.gguf") {
 		t.Errorf("hf link to %q", got)
 	}
 }
 
-// The same weights must land on the same tag whether they were pulled or
-// imported, so an ollama tag goes through the pull slug rules too.
+// The same weights must land on the same tag from a pull or an import.
 func TestImportTag(t *testing.T) {
 	for in, want := range map[string]string{
 		"UD-Q4_K_M": "q4-k-m",
@@ -94,7 +90,6 @@ func TestImportTag(t *testing.T) {
 	}
 }
 
-// Dry run is the default, so planning must not touch the destination.
 func TestPlanImportWritesNothing(t *testing.T) {
 	src, dest := importFixture(t)
 	if _, err := PlanImport(src, dest); err != nil {
@@ -137,7 +132,6 @@ func TestImportLinksRatherThanCopies(t *testing.T) {
 		}
 	}
 
-	// Re-running is a no-op rather than a second set of links.
 	again, err := PlanImport(src, dest)
 	if err != nil {
 		t.Fatal(err)
@@ -149,8 +143,7 @@ func TestImportLinksRatherThanCopies(t *testing.T) {
 	}
 }
 
-// A different file under the target name belongs to somebody else and the blob
-// it would replace cannot be recovered, so it is refused rather than clobbered.
+// A different file under the target name is somebody else's, so it is refused.
 func TestImportRefusesADifferentFile(t *testing.T) {
 	src, dest := importFixture(t)
 	occupied := filepath.Join(dest, "qwen3.8-27b-q3-32k")
@@ -173,7 +166,6 @@ func TestImportRefusesADifferentFile(t *testing.T) {
 	}
 }
 
-// What is imported has to be what the directory store then serves.
 func TestImportedModelsReadBack(t *testing.T) {
 	blobs, dest := t.TempDir(), t.TempDir()
 	weights := filepath.Join(blobs, "weights")

@@ -1,5 +1,4 @@
-// Command alpakka serves ollama's API backed by llama-server, with the
-// performance settings ollama has no way to express.
+// Command alpakka serves ollama's API backed by llama-server.
 package main
 
 import (
@@ -29,8 +28,7 @@ func main() {
 }
 
 func run(args []string) error {
-	// Bare flags keep starting the server, which is what every existing unit
-	// file and script invokes.
+	// Bare flags still start the server, as existing unit files invoke it.
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return serve(args)
 	}
@@ -95,8 +93,7 @@ func serve(args []string) error {
 	httpServer := &http.Server{
 		Addr:    cfg.Server.Listen,
 		Handler: srv.Handler(),
-		// Generation can legitimately run for minutes, so neither the read nor
-		// the write side may impose a deadline.
+		// No read or write deadline, since generation can run for minutes.
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 
@@ -120,16 +117,12 @@ func serve(args []string) error {
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
 
-	// The child holds the whole card. Leaving it running would make the next
-	// start fail for reasons that look nothing like the cause.
+	// The child holds the whole card, so leaving it running breaks the next start.
 	sup.Stop()
 	return nil
 }
 
-// openRoots resolves the roots to serve and reports which layout each is in.
-// A configured root that does not exist yet is skipped rather than fatal: a
-// machine may have ~/models before anything has been pulled into it, or the
-// other way round.
+// A configured root that does not exist yet is skipped, not fatal.
 func openRoots(cfg config.Config, override string, logger *log.Logger) ([]store.Source, error) {
 	roots := cfg.Store.Roots
 	if override != "" {

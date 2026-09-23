@@ -16,8 +16,6 @@ import (
 	"github.com/oswald/alpakka/internal/store"
 )
 
-// ggufFile is a real GGUF header with no keys and no tensors, which is all the
-// magic check and the store reader need.
 func ggufFile(pad int) []byte {
 	var b bytes.Buffer
 	b.WriteString("GGUF")
@@ -32,7 +30,6 @@ func ggufFile(pad int) []byte {
 	return b.Bytes()
 }
 
-// fakeHub serves the two endpoints a pull needs: the repo tree and the files.
 type fakeHub struct {
 	files  map[string][]byte
 	ranges int // requests that carried a Range header
@@ -80,7 +77,6 @@ func (h *fakeHub) start(t *testing.T) *Client {
 	return c
 }
 
-// The slashes in owner/repo are part of the route, not data.
 func TestURLsKeepTheirSeparators(t *testing.T) {
 	c := NewClient(nil)
 	c.Endpoint = "https://huggingface.co"
@@ -155,7 +151,6 @@ func TestResolveNeedsAQuantWhenThereAreSeveral(t *testing.T) {
 	}
 }
 
-// A repo naming its file only by quant falls back to the repo for the name.
 func TestResolveNamesFromTheRepoWhenTheFileCannot(t *testing.T) {
 	h := &fakeHub{files: map[string][]byte{"Q4_K_M.gguf": ggufFile(16)}}
 	c := h.start(t)
@@ -192,12 +187,10 @@ func TestPullWritesTheStoreLayout(t *testing.T) {
 			t.Errorf("%s: %v", want, err)
 		}
 	}
-	// A pull must leave nothing half-written behind.
 	if _, err := os.Stat(filepath.Join(root, "qwen3.8-27b", "iq3-xxs.gguf.part")); err == nil {
 		t.Error("the .part file survived a finished download")
 	}
 
-	// What was pulled has to be what the store then serves.
 	m, err := store.NewDir(root).Get("qwen3.8-27b:iq3-xxs")
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +249,6 @@ func TestPullFetchesEverySplitPart(t *testing.T) {
 	}
 }
 
-// A half-finished download must continue rather than start over.
 func TestDownloadResumesFromAPartFile(t *testing.T) {
 	body := ggufFile(4096)
 	h := &fakeHub{files: map[string][]byte{"model-Q8_0.gguf": body}}
@@ -283,9 +275,8 @@ func TestDownloadResumesFromAPartFile(t *testing.T) {
 	}
 }
 
-// A short read is what a dropped connection looks like, and a file that is not
-// a GGUF is what a signed-out HTML error page looks like. Neither may be left
-// in the store.
+// A short read is what a dropped connection looks like and a non-GGUF is a signed-out
+// HTML error page. Neither may be left in the store.
 func TestDownloadRejectsTruncatedAndNonGGUF(t *testing.T) {
 	body := ggufFile(64)
 	h := &fakeHub{files: map[string][]byte{

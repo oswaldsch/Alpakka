@@ -12,15 +12,12 @@ import (
 	"github.com/ollama/ollama/api"
 )
 
-// sseData is the prefix of a server-sent event's payload line.
 const sseData = "data: "
 
-// ReadSSE parses a server-sent event stream, calling fn for each chunk. The
-// terminating "[DONE]" event ends the stream without invoking fn.
+// The terminating "[DONE]" event ends the stream without invoking fn.
 func ReadSSE(r io.Reader, fn func(*Chunk) error) error {
 	sc := bufio.NewScanner(r)
-	// Chunks stay small, but a tool call with large arguments can push a single
-	// event well past the default limit.
+	// A tool call with large arguments can push a single event past the default scanner limit.
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
 	for sc.Scan() {
@@ -47,8 +44,6 @@ func ReadSSE(r io.Reader, fn func(*Chunk) error) error {
 	return sc.Err()
 }
 
-// Accumulator collects the parts of a completion that only arrive at the end:
-// the finish reason, the token counts, and any streamed tool call fragments.
 type Accumulator struct {
 	FinishReason string
 	Metrics      api.Metrics
@@ -62,7 +57,6 @@ type toolBuilder struct {
 	args strings.Builder
 }
 
-// Observe folds one chunk into the accumulator.
 func (a *Accumulator) Observe(c *Chunk, load, total time.Duration) {
 	if len(c.Choices) > 0 && c.Choices[0].FinishReason != "" {
 		a.FinishReason = c.Choices[0].FinishReason
@@ -101,13 +95,11 @@ func (a *Accumulator) observeTools(c *Chunk) {
 		if tc.Function.Name != "" {
 			b.name = tc.Function.Name
 		}
-		// Arguments arrive as a stream of JSON fragments that only parse once
-		// concatenated, so they are joined and decoded at the end.
+		// Arguments arrive as JSON fragments that only parse once concatenated.
 		b.args.WriteString(tc.Function.Arguments)
 	}
 }
 
-// ToolCalls returns the assembled tool calls, in the order they first appeared.
 func (a *Accumulator) ToolCalls() []api.ToolCall {
 	if len(a.order) == 0 {
 		return nil
@@ -124,8 +116,7 @@ func (a *Accumulator) ToolCalls() []api.ToolCall {
 			raw = "{}"
 		}
 		if err := json.Unmarshal([]byte(raw), &call.Function.Arguments); err != nil {
-			// A tool call whose arguments do not parse is not usable, and
-			// inventing a value would be worse than dropping it.
+			// A tool call whose arguments do not parse is unusable, and inventing a value would be worse than dropping it.
 			continue
 		}
 		out = append(out, call)
@@ -133,12 +124,8 @@ func (a *Accumulator) ToolCalls() []api.ToolCall {
 	return out
 }
 
-// DoneReason is the accumulated finish reason in ollama's vocabulary.
 func (a *Accumulator) DoneReason() string { return DoneReason(a.FinishReason) }
 
-// Chat converts an OpenAI SSE stream into ollama /api/chat responses, calling
-// emit for each one. The final response carries done, done_reason and metrics,
-// matching ollama's framing exactly.
 func Chat(r io.Reader, model string, load time.Duration, start time.Time, emit func(api.ChatResponse) error) error {
 	var acc Accumulator
 
@@ -146,8 +133,7 @@ func Chat(r io.Reader, model string, load time.Duration, start time.Time, emit f
 		acc.Observe(c, load, time.Since(start))
 		content, thinking := c.Text()
 		if content == "" && thinking == "" {
-			// llama.cpp opens with a role-only delta and closes with a
-			// usage-only event; ollama emits neither.
+			// llama.cpp opens with a role-only delta and closes with a usage-only event, ollama emits neither.
 			return nil
 		}
 		return emit(api.ChatResponse{
@@ -161,10 +147,8 @@ func Chat(r io.Reader, model string, load time.Duration, start time.Time, emit f
 		return err
 	}
 
-	// Ollama delivers tool calls in their own chunk before the final one, and
-	// leaves the final message empty. A client that reads tool_calls only from
-	// non-final chunks — a reasonable reading of ollama's stream — would miss
-	// them entirely if they rode on the done message.
+	// Ollama delivers tool calls in their own chunk before the final one and leaves the final
+	// message empty, so a client reading tool_calls from non-final chunks would miss them otherwise.
 	if calls := acc.ToolCalls(); len(calls) > 0 {
 		err := emit(api.ChatResponse{
 			Model:     model,
@@ -177,8 +161,7 @@ func Chat(r io.Reader, model string, load time.Duration, start time.Time, emit f
 		}
 	}
 
-	// Ollama's total_duration spans the whole request, the load included, so a
-	// cold start must not report a total smaller than its own load_duration.
+	// Ollama's total_duration spans the whole request, so a cold start must not report a total below its load_duration.
 	acc.Metrics.TotalDuration = load + time.Since(start)
 	acc.Metrics.LoadDuration = load
 	return emit(api.ChatResponse{
@@ -191,7 +174,6 @@ func Chat(r io.Reader, model string, load time.Duration, start time.Time, emit f
 	})
 }
 
-// Generate converts an OpenAI SSE stream into ollama /api/generate responses.
 func Generate(r io.Reader, model string, load time.Duration, start time.Time, emit func(api.GenerateResponse) error) error {
 	var acc Accumulator
 
@@ -213,8 +195,7 @@ func Generate(r io.Reader, model string, load time.Duration, start time.Time, em
 		return err
 	}
 
-	// Ollama's total_duration spans the whole request, the load included, so a
-	// cold start must not report a total smaller than its own load_duration.
+	// Ollama's total_duration spans the whole request, so a cold start must not report a total below its load_duration.
 	acc.Metrics.TotalDuration = load + time.Since(start)
 	acc.Metrics.LoadDuration = load
 	return emit(api.GenerateResponse{
@@ -227,8 +208,6 @@ func Generate(r io.Reader, model string, load time.Duration, start time.Time, em
 	})
 }
 
-// CollectChat folds a whole stream into the single response shape ollama
-// returns when stream is false.
 func CollectChat(r io.Reader, model string, load time.Duration, start time.Time) (api.ChatResponse, error) {
 	var content, thinking bytes.Buffer
 	var final api.ChatResponse
@@ -238,8 +217,7 @@ func CollectChat(r io.Reader, model string, load time.Duration, start time.Time)
 		if !resp.Done {
 			content.WriteString(resp.Message.Content)
 			thinking.WriteString(resp.Message.Thinking)
-			// Tool calls now arrive in their own non-final chunk, so the
-			// collected form has to pick them up from there.
+			// Tool calls arrive in their own non-final chunk, so the collected form picks them up there.
 			calls = append(calls, resp.Message.ToolCalls...)
 			return nil
 		}
@@ -255,7 +233,6 @@ func CollectChat(r io.Reader, model string, load time.Duration, start time.Time)
 	return final, nil
 }
 
-// CollectGenerate is the non-streaming form of Generate.
 func CollectGenerate(r io.Reader, model string, load time.Duration, start time.Time) (api.GenerateResponse, error) {
 	var content, thinking bytes.Buffer
 	var final api.GenerateResponse

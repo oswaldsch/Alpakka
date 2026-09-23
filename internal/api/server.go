@@ -1,5 +1,4 @@
-// Package api serves ollama's HTTP surface, backed by a supervised
-// llama-server.
+// Package api serves ollama's HTTP surface, backed by a supervised llama-server.
 package api
 
 import (
@@ -20,29 +19,25 @@ import (
 	"github.com/oswald/alpakka/internal/supervisor"
 )
 
-// Version is reported by /api/version. Clients gate features on it, so it
-// claims compatibility with the ollama release alpakka's types come from.
+// Clients gate features on it, so it claims compatibility with the ollama release the types come from.
 const Version = "0.32.0"
 
-// Server wires the store, the config and the supervisor into ollama's API.
 type Server struct {
 	Store  store.Source
 	Config config.Config
 	Super  *supervisor.Supervisor
 	Logger *log.Logger
 
-	// loadMu serialises model loads. One card, one model: without this two
-	// simultaneous requests for different models would fight over the GPU,
-	// each tearing down the other's server.
+	// One card, one model: without this two simultaneous loads of different models would
+	// tear down each other's server.
 	loadMu sync.Mutex
 }
 
-// Handler returns the routed HTTP handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	// Registered without a method so it also serves as the catch-all; a
-	// method-scoped "/" would conflict with the more specific routes below.
+	// Registered without a method so it also serves as the catch-all, since a method-scoped "/"
+	// would conflict with the routes below.
 	mux.HandleFunc("/", s.handleRoot)
 	mux.HandleFunc("GET /api/version", s.handleVersion)
 	mux.HandleFunc("GET /api/tags", s.handleTags)
@@ -53,20 +48,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/embed", s.handleEmbed)
 	mux.HandleFunc("POST /api/embeddings", s.handleEmbeddings)
 
-	// The OpenAI surface is proxied straight through to llama-server, which
-	// already speaks it. Only model routing and option injection happen here.
 	mux.HandleFunc("/v1/chat/completions", s.handleOpenAI)
 	mux.HandleFunc("/v1/completions", s.handleOpenAI)
 	mux.HandleFunc("/v1/embeddings", s.handleOpenAI)
 	mux.HandleFunc("GET /v1/models", s.handleOpenAIModels)
 
-	// alpakka's own surface, deliberately outside both wire protocols so no
-	// ollama or OpenAI client can reach it by accident.
+	// alpakka's own surface, outside both wire protocols so no ollama or OpenAI client reaches it by accident.
 	mux.HandleFunc("POST /alpakka/bench", s.handleBench)
 	mux.HandleFunc("GET /alpakka/status", s.handleBenchStatus)
 
-	// Writing to the model store is out of scope. Say so plainly rather than
-	// half-implementing it.
+	// Writing to the model store is out of scope, so say so rather than half-implement it.
 	for _, p := range []string{"/api/pull", "/api/create", "/api/push", "/api/copy", "/api/delete"} {
 		mux.HandleFunc(p, s.handleUnsupported)
 	}
@@ -74,20 +65,14 @@ func (s *Server) Handler() http.Handler {
 	return s.logRequests(s.withCORS(mux))
 }
 
-// localHosts are the host names a browser page served from this machine can
-// carry in an Origin header.
 var localHosts = []string{"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
-// appSchemes are the origins desktop and extension clients present. They are
-// not http(s), so there is no host to match on.
+// Desktop and extension clients present these non-http(s) origins, so there is no host to match on.
 var appSchemes = []string{"app", "file", "tauri", "vscode-webview",
 	"vscode-file", "moz-extension", "chrome-extension", "safari-web-extension"}
 
-// originAllowed reports whether a browser origin may call the API.
-//
-// With no configured list this mirrors ollama's default: any port on the
-// loopback interface, plus the schemes desktop clients use. A configured list
-// replaces that entirely, and "*" in it allows everything.
+// With no configured list this mirrors ollama's default of any loopback port plus desktop
+// schemes. A configured list replaces that, and "*" allows everything.
 func (s *Server) originAllowed(origin string) bool {
 	if origin == "" {
 		return false
@@ -119,16 +104,12 @@ func (s *Server) originAllowed(origin string) bool {
 	return false
 }
 
-// withCORS answers preflights and marks allowed origins.
-//
-// Without this a browser client cannot reach alpakka at all: the mux answers an
-// OPTIONS preflight with 405, and the browser reports that as an opaque CORS
-// failure with nothing in the server log to explain it.
+// The mux answers an OPTIONS preflight with 405, so without this browser clients see an
+// opaque CORS failure with nothing in the server log.
 func (s *Server) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		// Set unconditionally: the response varies by origin whether or not
-		// this particular one was allowed.
+		// Set unconditionally since the response varies by origin whether or not this one was allowed.
 		h.Add("Vary", "Origin")
 
 		if origin := r.Header.Get("Origin"); s.originAllowed(origin) {
@@ -249,10 +230,8 @@ func (s *Server) handlePS(w http.ResponseWriter, r *http.Request) {
 			entry.Digest = m.Digest
 			entry.Size = m.Size
 			entry.Details = m.Details()
-			// One model, fully on the GPU: that is the invariant the fit check
-			// enforces, so the resident size is the whole model plus the KV
-			// cache llama.cpp reported allocating. Reporting the weights alone
-			// understates VRAM by the cache, which at 32k and q8_0 is GBs.
+			// One model fully on the GPU is the fit check's invariant, so resident size is the weights plus
+			// the KV cache llama.cpp reported. Weights alone understate VRAM by GBs at 32k and q8_0.
 			entry.SizeVRAM = m.Size + int64(inst.Fit().KVBufferMiB*1024*1024)
 		}
 		resp.Models = append(resp.Models, entry)
@@ -260,19 +239,8 @@ func (s *Server) handlePS(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// resolve turns a request's model name and options into a ready instance.
-//
-// It returns how long readiness took, which becomes load_duration. Requests
-// that arrive while a model is loading block here rather than failing.
-//
-// The returned instance carries a reference: nothing will evict or reload it
-// until the caller calls Release, so every caller must defer that.
-//
-// forEmbedding says the request came in on an embedding endpoint. Ollama embeds
-// with any model, chat models included, so the endpoint decides this and not
-// only the model: llama-server needs --embeddings either way, and a chat model
-// asked to embed reloads into an embedding process the same way ollama starts a
-// separate runner for it.
+// The returned instance carries a reference, so every caller must defer Release. forEmbedding is
+// set by the endpoint since ollama embeds with any model, and a chat model asked to embed reloads into an embedding process.
 func (s *Server) resolve(ctx context.Context, name string, opts map[string]any, keepAlive *api.Duration,
 	forEmbedding bool) (*supervisor.Instance, config.Profile, time.Duration, error) {
 
@@ -289,17 +257,13 @@ func (s *Server) resolve(ctx context.Context, name string, opts map[string]any, 
 
 	rt := profile.Runtime(m.Name, m.ModelPath, m.ProjectorPath, forEmbedding || m.IsEmbedding())
 	if rt.Embedding && rt.Pooling == "" && !m.DeclaresPooling() {
-		// A causal model has no pooling type, and llama.cpp's OpenAI endpoint
-		// rejects "none" rather than returning per-token vectors. Ollama embeds
-		// with any model, so pick the reduction decoder models are trained for
-		// rather than fail the request.
+		// A causal model has no pooling type and llama.cpp's OpenAI endpoint rejects "none", so pick the
+		// reduction decoder models are trained for rather than fail.
 		rt.Pooling = "last"
 	}
 	if rt.Embedding {
-		// An embedding model has no context to extend, so asking for more than
-		// it was trained on is not a performance choice but a load that
-		// --fit off refuses outright. The global num_ctx default is aimed at
-		// chat models and would fail every embedding load.
+		// An embedding model has no context to extend, so asking for more than it was trained on is a load
+		// that --fit off refuses. The chat-oriented global num_ctx default would fail every embedding load.
 		if trained := m.TrainedContext(); trained > 0 && rt.NumCtx > trained {
 			s.logf("%s: num_ctx %d exceeds the model's trained %d, using %d",
 				m.Name, rt.NumCtx, trained, trained)
@@ -336,7 +300,6 @@ type errBadRequest struct{ err error }
 
 func (e errBadRequest) Error() string { return e.err.Error() }
 
-// writeResolveError maps a resolve failure onto the status code ollama uses.
 func writeResolveError(w http.ResponseWriter, name string, err error) {
 	var nf errModelNotFound
 	var bad errBadRequest
@@ -351,7 +314,7 @@ func writeResolveError(w http.ResponseWriter, name string, err error) {
 }
 
 func writeModelNotFound(w http.ResponseWriter, name string) {
-	// Ollama's exact wording and status; clients match on both.
+	// Ollama's exact wording and status, since clients match on both.
 	writeError(w, http.StatusNotFound, fmt.Sprintf("model '%s' not found", name))
 }
 
@@ -373,7 +336,6 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
-// formatParameters renders a params blob the way `ollama show` prints it.
 func formatParameters(params map[string]any) string {
 	if len(params) == 0 {
 		return ""

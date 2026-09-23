@@ -9,8 +9,7 @@ import (
 	"testing"
 )
 
-// writeGGUF writes a real GGUF header with no tensor data, which is all any
-// store test needs: the reader never touches the weights.
+// Only the header is written, since the reader never touches the weights.
 func writeGGUF(t *testing.T, path string, kv map[string]any) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

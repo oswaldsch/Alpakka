@@ -28,8 +28,6 @@ func TestBenchRejectsBadRequests(t *testing.T) {
 	}
 }
 
-// A bad option must be rejected before the load, the same way every other
-// endpoint rejects it.
 func TestBenchRejectsBadOptionsBeforeLoading(t *testing.T) {
 	w := do(t, testServer(t), http.MethodPost, "/alpakka/bench",
 		`{"model":"qwen3:0.6b","options":{"reasoning_effort":"high"}}`)
@@ -48,8 +46,6 @@ func TestBenchUnknownModel(t *testing.T) {
 	}
 }
 
-// The bench surface is alpakka's own: an ollama or OpenAI client must not be
-// able to reach it, and it must not answer on their prefixes.
 func TestBenchIsNotOnTheOllamaOrOpenAISurface(t *testing.T) {
 	h := testServer(t)
 	for _, p := range []string{"/api/bench", "/v1/bench", "/api/alpakka/bench"} {
@@ -70,15 +66,13 @@ func TestBenchStatusReportsNothingLoaded(t *testing.T) {
 	}
 }
 
-// The word count is only an estimate of the token count, but a prompt asked for
-// in the thousands must not come back in the tens.
+// The word count only estimates tokens, but a prompt asked for in the thousands must not come back in the tens.
 func TestFillerPromptLengthAndVariation(t *testing.T) {
 	a := fillerPrompt(2000, 0)
 	if got := len(strings.Fields(a)); got != 2000 {
 		t.Errorf("words = %d, want 2000", got)
 	}
-	// Each run gets its own prompt so llama.cpp cannot answer the second run's
-	// prefill out of the first run's cache.
+	// Each run gets its own prompt so llama.cpp cannot answer the second prefill from the first run's cache.
 	if b := fillerPrompt(2000, 1); a == b {
 		t.Error("two runs were given the same prompt")
 	}
@@ -92,7 +86,7 @@ func TestAggregatePoolsRunsRatherThanAveragingRates(t *testing.T) {
 	if got.PromptTokens != 1000 || got.PromptTPS != 1000 {
 		t.Errorf("prompt = %d tokens at %v tok/s, want 1000 at 1000", got.PromptTokens, got.PromptTPS)
 	}
-	// Averaging the two rates would give 32.5; pooling gives the real 50.
+	// Averaging the two rates would give 32.5, pooling gives the real 50.
 	if got.PredictTPS != 50 {
 		t.Errorf("predict_tps = %v, want 50", got.PredictTPS)
 	}

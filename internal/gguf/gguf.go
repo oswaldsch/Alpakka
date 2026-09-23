@@ -1,9 +1,4 @@
-// Package gguf reads the metadata header of a GGUF file.
-//
-// Only the key/value block is parsed; tensor data is never touched. Ollama
-// surfaces this metadata as details.family, parameter_size, context_length and
-// the model_info map, so alpakka has to read it to answer /api/tags and
-// /api/show faithfully.
+// Package gguf reads the metadata header of a GGUF file, never the tensor data.
 package gguf
 
 import (
@@ -18,7 +13,6 @@ import (
 
 const magic = 0x46554747 // "GGUF" little-endian
 
-// value types, per the GGUF spec
 const (
 	typeUint8 uint32 = iota
 	typeInt8
@@ -35,12 +29,10 @@ const (
 	typeFloat64
 )
 
-// maxArrayLen caps how many array elements are materialised. Token vocabularies
-// run to hundreds of thousands of entries and nothing here needs them; longer
-// arrays are walked and discarded so parsing can continue to the next key.
+// Token vocabularies run to hundreds of thousands of entries and nothing needs them,
+// so longer arrays are walked and discarded.
 const maxArrayLen = 1024
 
-// File is the parsed metadata header of a GGUF file.
 type File struct {
 	Version     uint32
 	TensorCount uint64
@@ -48,15 +40,12 @@ type File struct {
 	Tensors     []Tensor
 }
 
-// Tensor is one entry of the tensor-info block: name and shape only. Offsets
-// and data are not read.
 type Tensor struct {
 	Name  string
 	Shape []uint64
 	Type  uint32
 }
 
-// Elements is the number of values in the tensor.
 func (t Tensor) Elements() uint64 {
 	n := uint64(1)
 	for _, d := range t.Shape {
@@ -65,9 +54,8 @@ func (t Tensor) Elements() uint64 {
 	return n
 }
 
-// ParameterCount sums the elements of every tensor. GGUFs converted by some
-// toolchains omit general.parameter_count, and this is what ollama reports as
-// details.parameter_size, so it is always computed rather than read.
+// Some toolchains omit general.parameter_count and ollama reports this as
+// details.parameter_size, so it is always computed.
 func (f *File) ParameterCount() uint64 {
 	var n uint64
 	for _, t := range f.Tensors {
@@ -76,25 +64,21 @@ func (f *File) ParameterCount() uint64 {
 	return n
 }
 
-// Architecture returns general.architecture, e.g. "qwen35".
 func (f *File) Architecture() string {
 	s, _ := f.KV["general.architecture"].(string)
 	return s
 }
 
-// ArchKV looks up a key under the file's architecture namespace, so callers can
-// ask for "context_length" without knowing it is stored as "qwen35.context_length".
+// Lets callers ask for "context_length" without knowing it is stored as "qwen35.context_length".
 func (f *File) ArchKV(suffix string) (any, bool) {
 	v, ok := f.KV[f.Architecture()+"."+suffix]
 	return v, ok
 }
 
-// Uint reads an integer-valued key, normalising across the GGUF integer types.
 func (f *File) Uint(key string) (uint64, bool) {
 	return toUint(f.KV[key])
 }
 
-// ArchUint reads an integer-valued key under the architecture namespace.
 func (f *File) ArchUint(suffix string) (uint64, bool) {
 	v, ok := f.ArchKV(suffix)
 	if !ok {
@@ -103,7 +87,6 @@ func (f *File) ArchUint(suffix string) (uint64, bool) {
 	return toUint(v)
 }
 
-// String reads a string-valued key.
 func (f *File) String(key string) (string, bool) {
 	s, ok := f.KV[key].(string)
 	return s, ok
@@ -131,7 +114,6 @@ func toUint(v any) (uint64, bool) {
 	return 0, false
 }
 
-// Open parses the metadata header of the GGUF file at path.
 func Open(path string) (*File, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -141,7 +123,6 @@ func Open(path string) (*File, error) {
 	return Read(bufio.NewReaderSize(f, 1<<20))
 }
 
-// Read parses a GGUF metadata header from r, stopping after the last key.
 func Read(r io.Reader) (*File, error) {
 	d := &decoder{r: r}
 
@@ -266,8 +247,7 @@ func (d *decoder) str() string {
 	return string(b)
 }
 
-// value decodes one value of the given type. It returns nil for values that are
-// skipped rather than kept (over-long arrays), which the caller drops.
+// Returns nil for skipped values (over-long arrays), which the caller drops.
 func (d *decoder) value(t uint32) any {
 	switch t {
 	case typeUint8:
@@ -327,8 +307,7 @@ func (d *decoder) array() any {
 	return out
 }
 
-// FileTypeName maps general.file_type to the quantization label ollama reports,
-// e.g. 12 -> "Q3_K_M". Unknown values report as "unknown", matching ollama.
+// Unknown values report as "unknown", matching ollama.
 func FileTypeName(ft uint64) string {
 	names := map[uint64]string{
 		0: "F32", 1: "F16", 2: "Q4_0", 3: "Q4_1", 7: "Q8_0", 8: "Q5_0", 9: "Q5_1",
@@ -344,7 +323,6 @@ func FileTypeName(ft uint64) string {
 	return "unknown"
 }
 
-// HumanParams formats a parameter count the way ollama does, e.g. "27.3B".
 func HumanParams(n uint64) string {
 	switch {
 	case n == 0:

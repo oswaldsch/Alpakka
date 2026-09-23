@@ -19,7 +19,6 @@ import (
 	"github.com/oswald/alpakka/internal/config"
 )
 
-// Instance is one running llama-server process.
 type Instance struct {
 	rt      config.Runtime
 	cmd     *exec.Cmd
@@ -27,8 +26,6 @@ type Instance struct {
 	baseURL string
 	started time.Time
 
-	// inhibit is the systemd-inhibit process held for as long as this instance
-	// is offloaded onto an RPC node, nil otherwise.
 	inhibit *exec.Cmd
 
 	ready    chan struct{}
@@ -38,7 +35,7 @@ type Instance struct {
 	notable *ring
 
 	mu        sync.Mutex
-	idle      *sync.Cond // broadcast when inflight reaches zero, or on exit
+	idle      *sync.Cond
 	inflight  int
 	keep      time.Duration
 	exited    bool
@@ -47,38 +44,30 @@ type Instance struct {
 	kvBuf     map[string]float64
 }
 
-// Fit records what llama.cpp reported about where the weights ended up.
 type Fit struct {
 	OffloadedLayers int
 	TotalLayers     int
 	CPUBufferMiB    float64
-	// KVBufferMiB is the KV cache actually allocated, which is resident VRAM
-	// the model's file size does not account for.
+	// The KV cache is resident VRAM that the model's file size does not account for.
 	KVBufferMiB float64
 	VRAMMiB     float64
 	Seen        bool
 }
 
-// OK reports whether every layer llama.cpp counted made it onto the GPU.
 func (f Fit) OK() bool { return f.Seen && f.OffloadedLayers == f.TotalLayers }
 
-// Runtime returns the settings this process was started with.
 func (i *Instance) Runtime() config.Runtime { return i.rt }
 
-// BaseURL is the root of the llama-server HTTP API.
 func (i *Instance) BaseURL() string { return i.baseURL }
 
-// StartedAt is when the process was spawned.
 func (i *Instance) StartedAt() time.Time { return i.started }
 
-// Fit returns the offload report gathered at load time.
 func (i *Instance) Fit() Fit {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return i.fit
 }
 
-// Touch sets the keep-alive window and restarts it.
 func (i *Instance) Touch(d time.Duration) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -86,22 +75,17 @@ func (i *Instance) Touch(d time.Duration) {
 	i.restartKeepAlive()
 }
 
-// restartKeepAlive reopens the window from now. The caller holds i.mu.
 func (i *Instance) restartKeepAlive() {
 	if i.keep <= 0 {
-		// Ollama treats a non-positive keep-alive as "unload when done".
+		// Ollama treats a non-positive keep-alive as unload when done.
 		i.expiresAt = time.Now()
 		return
 	}
 	i.expiresAt = time.Now().Add(i.keep)
 }
 
-// acquireIfLive registers an in-flight request, reporting false if the process
-// is already gone.
-//
-// Holding a reference is what stops the evictor and a competing reload from
-// tearing the process down underneath a response that is still streaming. The
-// caller owns the reference until it calls Release.
+// A held reference stops the evictor and a competing reload from tearing the
+// process down under a streaming response.
 func (i *Instance) acquireIfLive() bool {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -113,11 +97,8 @@ func (i *Instance) acquireIfLive() bool {
 	return true
 }
 
-// Release ends an in-flight request.
-//
-// The keep-alive window restarts here rather than at the request's arrival,
-// which is what ollama does: a generation that runs longer than keep_alive must
-// not have its own server evicted out from under it.
+// The window restarts here rather than at arrival, as ollama does, so a
+// generation longer than keep_alive is not evicted.
 func (i *Instance) Release() {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -130,15 +111,12 @@ func (i *Instance) Release() {
 	}
 }
 
-// busy reports whether any request is currently using the instance.
 func (i *Instance) busy() bool {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return i.inflight > 0
 }
 
-// waitIdle blocks until nothing is using the instance, the process is gone, or
-// ctx is done. A reload waits on this so it never truncates a live response.
 func (i *Instance) waitIdle(ctx context.Context) error {
 	stop := context.AfterFunc(ctx, func() {
 		i.mu.Lock()
@@ -158,7 +136,6 @@ func (i *Instance) waitIdle(ctx context.Context) error {
 	return nil
 }
 
-// ExpiresAt is when the keep-alive window closes.
 func (i *Instance) ExpiresAt() time.Time {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -168,9 +145,8 @@ func (i *Instance) ExpiresAt() time.Time {
 func (i *Instance) expired(now time.Time) bool {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	// A request in flight pins the process. Evicting here would kill a
-	// generation mid-stream, which the client sees as a truncated answer
-	// rather than an error.
+	// A request in flight pins the process, since evicting would truncate the
+	// generation with no error.
 	if i.inflight > 0 {
 		return false
 	}
@@ -183,8 +159,6 @@ func (i *Instance) dead() bool {
 	return i.exited
 }
 
-// wait blocks until the instance is serving, the load fails, or ctx is done.
-// This is what makes requests that arrive during a load queue rather than error.
 func (i *Instance) wait(ctx context.Context) error {
 	select {
 	case <-i.ready:
@@ -194,23 +168,16 @@ func (i *Instance) wait(ctx context.Context) error {
 	}
 }
 
-// record files one line of the child's stderr.
 func (i *Instance) record(line string) {
 	i.log.add(line)
 	i.observe(line)
 }
 
-// maxLine bounds an unterminated tail before it is filed anyway, so a child
-// that writes without newlines cannot grow the buffer without limit.
+// Bounds an unterminated tail so a child writing without newlines cannot grow the buffer forever.
 const maxLine = 1 << 20
 
-// stderrWriter splits the child's stderr into lines.
-//
-// This is deliberately an io.Writer rather than a goroutine over StderrPipe:
-// os/exec closes a StderrPipe as soon as Wait returns, which races the reader
-// and can swallow exactly the lines that explain a fast crash. Given a plain
-// writer, Wait waits for the copy to finish, so the diagnosis is always
-// complete by the time the process is marked dead.
+// An io.Writer rather than a goroutine over StderrPipe: os/exec closes the pipe
+// when Wait returns, which can swallow the lines explaining a fast crash.
 type stderrWriter struct {
 	inst *Instance
 	buf  bytes.Buffer
@@ -221,8 +188,7 @@ func (w *stderrWriter) Write(p []byte) (int, error) {
 	for {
 		line, err := w.buf.ReadString('\n')
 		if err != nil {
-			// A partial line: hold it until the rest arrives. ReadString has
-			// drained the buffer, so writing it back restores the tail.
+			// ReadString drained the buffer, so writing the partial line back restores the tail.
 			if len(line) > maxLine {
 				w.inst.record(line)
 			} else {
@@ -237,10 +203,8 @@ func (w *stderrWriter) Write(p []byte) (int, error) {
 var (
 	reOffloaded = regexp.MustCompile(`offloaded (\d+)/(\d+) layers to GPU`)
 	reCPUBuffer = regexp.MustCompile(`(?:CPU|CPU_Mapped) model buffer size\s*=\s*([0-9.]+) MiB`)
-	// llama.cpp prints one of these per KV buffer, named by its backend. What a
-	// build with --kv-stream-arena-mib reports here — the arena, the pinned host
-	// cache, or both — has not been checked against a real streaming build, so
-	// Fit.KVBufferMiB may not mean what it does otherwise.
+	// Unchecked against a real --kv-stream-arena-mib build, so KVBufferMiB may not
+	// mean here what it does otherwise.
 	reKVBuffer = regexp.MustCompile(`(\S+)\s+KV buffer size\s*=\s*([0-9.]+) MiB`)
 )
 
@@ -261,8 +225,7 @@ func (i *Instance) observe(line string) {
 		// counts as KVBufferMiB and /api/ps size_vram although it is host RAM.
 		mib, _ := strconv.ParseFloat(m[2], 64)
 		i.mu.Lock()
-		// Keyed by buffer name and kept at its maximum, so a repeated fitting
-		// pass reports the cache once rather than several times over.
+		// Keyed by buffer name at its maximum, so repeated fitting passes count the cache once.
 		if i.kvBuf == nil {
 			i.kvBuf = map[string]float64{}
 		}
@@ -280,8 +243,7 @@ func (i *Instance) observe(line string) {
 	if m := reCPUBuffer.FindStringSubmatch(line); m != nil {
 		mib, _ := strconv.ParseFloat(m[1], 64)
 		i.mu.Lock()
-		// llama.cpp prints this once per fitting pass; the largest is the one
-		// that actually describes the loaded model.
+		// Printed once per fitting pass, and the largest describes the loaded model.
 		if mib > i.fit.CPUBufferMiB {
 			i.fit.CPUBufferMiB = mib
 		}
@@ -289,13 +251,10 @@ func (i *Instance) observe(line string) {
 	}
 }
 
-// llama-server prefixes each line with a timestamp and a level letter, so an
-// error line looks like "0.01.563.011 E ...".
+// llama-server prefixes each line with a timestamp and a level letter, like "0.01.563.011 E ...".
 var reLevel = regexp.MustCompile(`^[0-9.]+ ([A-Z]) `)
 
-// isNotable picks out the lines worth showing a user when a load fails. The
-// default log is dominated by per-layer debug output, and burying the actual
-// cause in it makes a clean failure useless.
+// The default log is dominated by per-layer debug output that would bury the cause of a failed load.
 func isNotable(line string) bool {
 	if m := reLevel.FindStringSubmatch(line); m != nil {
 		switch m[1] {
@@ -315,8 +274,6 @@ func isNotable(line string) bool {
 	return false
 }
 
-// diagnosis returns the most useful explanation of a failed load: the lines
-// llama-server flagged as problems, or the raw tail when it flagged none.
 func (i *Instance) diagnosis() string {
 	if s := i.notable.tail(12); s != "" {
 		return s
@@ -325,8 +282,7 @@ func (i *Instance) diagnosis() string {
 }
 
 func (i *Instance) reap() {
-	// Wait also waits for the stderr copier, so every line the child wrote has
-	// been filed by the time the process is marked dead.
+	// Wait also waits for the stderr copier, so every line is filed by the time the process is marked dead.
 	err := i.cmd.Wait()
 	i.mu.Lock()
 	i.exited = true
@@ -336,8 +292,6 @@ func (i *Instance) reap() {
 	_ = err
 }
 
-// probe waits for the server to answer /health, then checks that the load
-// actually fit on the GPU before declaring the instance ready.
 func (i *Instance) probe(timeout time.Duration, logf Logf) {
 	defer close(i.ready)
 
@@ -377,8 +331,7 @@ func (i *Instance) probe(timeout time.Duration, logf Logf) {
 	}
 
 	fit := i.Fit()
-	// Weights on the CPU pass the fit check only when they were put there on
-	// purpose, so say how much landed there rather than leaving it to a guess.
+	// Weights on the CPU pass the fit check only when put there on purpose, so say how much landed there.
 	cpu := ""
 	if fit.CPUBufferMiB > 0 {
 		cpu = fmt.Sprintf(", %.0f MiB weights on CPU", fit.CPUBufferMiB)
@@ -399,8 +352,7 @@ func parseVRAMKiB(s string) uint64 {
 	return total
 }
 
-// checkVRAMCap verifies the complete child allocation through Linux DRM
-// accounting. A configured cap fails closed if no allocation can be measured.
+// A configured cap fails closed if no allocation can be measured.
 func (i *Instance) checkVRAMCap() error {
 	if i.rt.GPUVRAMCapMiB <= 0 {
 		return nil
@@ -430,19 +382,13 @@ func (i *Instance) checkVRAMCap() error {
 	return nil
 }
 
-// checkFit refuses to serve a model that did not fully land on the GPU.
-//
-// A partial spill is not a degraded success: it is a silent five-fold decode
-// slowdown that looks like a performance regression rather than a
-// misconfiguration. Failing loudly here is the entire point of the project.
+// A partial spill is a silent five-fold decode slowdown that looks like a
+// regression, so fail loudly.
 func (i *Instance) checkFit() error {
 	fit := i.Fit()
 	if !fit.Seen {
-		// The check is the whole point of the project, so an unverifiable load
-		// fails rather than passes. Returning nil here would turn the guarantee
-		// into a no-op the first time llama.cpp reworded or stopped printing
-		// the line, and the symptom would be the silent five-fold slowdown this
-		// exists to catch.
+		// An unverifiable load fails rather than passes, else the guarantee becomes a
+		// no-op the first time llama.cpp rewords the line.
 		return fmt.Errorf(
 			"%s: llama-server never reported its layer offload, so alpakka cannot tell "+
 				"whether the model fits on the GPU and will not serve it. "+
@@ -465,16 +411,14 @@ func (i *Instance) checkFit() error {
 	return nil
 }
 
-// stop kills the process group and waits for it to go away.
 func (i *Instance) stop() {
 	if i.cmd != nil && i.cmd.Process != nil {
 		pgid, err := syscall.Getpgid(i.cmd.Process.Pid)
 		if err != nil {
 			pgid = i.cmd.Process.Pid
 		}
-		// Signal the whole group: a stray grandchild that survives would keep
-		// both the port and the VRAM, and the next load would fail for reasons
-		// that look nothing like the cause.
+		// Signal the whole group: a surviving grandchild would keep the port and VRAM
+		// and break the next load confusingly.
 		_ = syscall.Kill(-pgid, syscall.SIGTERM)
 
 		done := make(chan struct{})
@@ -495,10 +439,8 @@ func (i *Instance) stop() {
 	stopInhibitor(i.inhibit)
 }
 
-// Log returns the tail of the child's stderr.
 func (i *Instance) Log(n int) string { return i.log.tail(n) }
 
-// ring keeps the last n lines of output.
 type ring struct {
 	mu    sync.Mutex
 	lines []string
