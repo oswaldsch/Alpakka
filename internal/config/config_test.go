@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -451,6 +452,39 @@ func TestRejectsBadBatchAndLoadMode(t *testing.T) {
 	} {
 		if _, err := Apply(Profile{}, opts); err == nil {
 			t.Errorf("%s: accepted %v", name, opts)
+		}
+	}
+}
+
+func TestMergeCarriesEveryField(t *testing.T) {
+	full := Profile{}
+	v := reflect.ValueOf(&full).Elem()
+	for i := range v.NumField() {
+		f := v.Field(i)
+		if f.Kind() == reflect.Pointer {
+			f.Set(reflect.New(f.Type().Elem()))
+		} else {
+			f.Set(reflect.MakeSlice(f.Type(), 1, 1))
+		}
+	}
+	if got := Merge(Profile{}, full); !reflect.DeepEqual(got, full) {
+		t.Errorf("Merge over an empty profile dropped fields:\n got %+v\nwant %+v", got, full)
+	}
+	if got := Merge(full, Profile{}); !reflect.DeepEqual(got, full) {
+		t.Errorf("an empty override cleared fields:\n got %+v\nwant %+v", got, full)
+	}
+}
+
+// A field type without a setter panics, so this also covers every new option.
+func TestEveryOptionRejectsTheWrongType(t *testing.T) {
+	for key := range optionFields {
+		if _, err := Apply(Profile{}, map[string]any{key: struct{}{}}); err == nil {
+			t.Errorf("option %q accepted a struct", key)
+		}
+	}
+	for _, key := range []string{"parallel", "keep_alive"} {
+		if _, ok := optionFields[key]; ok {
+			t.Errorf("%s is settable per request", key)
 		}
 	}
 }

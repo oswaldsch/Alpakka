@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 )
 
 // alpakka's own settings ride in the same options object. Ollama ignores
@@ -11,114 +12,15 @@ func Apply(p Profile, opts map[string]any) (Profile, error) {
 		return p, nil
 	}
 	out := p
+	fields := reflect.ValueOf(&out).Elem()
 
 	for k, v := range opts {
-		var err error
-		switch k {
-		case "num_ctx":
-			err = setInt(&out.NumCtx, k, v)
-		case "cache_type_k":
-			err = setStr(&out.CacheTypeK, k, v)
-		case "cache_type_v":
-			err = setStr(&out.CacheTypeV, k, v)
-		case "cache_type_k_draft":
-			err = setStr(&out.CacheTypeKDraft, k, v)
-		case "cache_type_v_draft":
-			err = setStr(&out.CacheTypeVDraft, k, v)
-		case "num_batch":
-			err = setInt(&out.NumBatch, k, v)
-		case "num_ubatch":
-			err = setInt(&out.NumUBatch, k, v)
-		case "load_mode":
-			err = setStr(&out.LoadMode, k, v)
-		case "spec_type":
-			err = setStr(&out.SpecType, k, v)
-		case "spec_draft_n_max":
-			err = setInt(&out.SpecDraftNMax, k, v)
-		case "spec_draft_n_min":
-			err = setInt(&out.SpecDraftNMin, k, v)
-		case "num_gpu":
-			err = setInt(&out.NumGPU, k, v)
-		case "allow_partial_offload":
-			err = setBool(&out.AllowPartialOffload, k, v)
-		case "gpu_vram_cap_mib":
-			err = setInt(&out.GPUVRAMCapMiB, k, v)
-		case "flash_attn":
-			err = setStr(&out.FlashAttn, k, v)
-		case "backend":
-			err = setStr(&out.Backend, k, v)
-		case "num_cpu_moe":
-			err = setInt(&out.NumCPUMoE, k, v)
-		case "override_tensor":
-			err = setStrings(&out.OverrideTensor, k, v)
-		case "rpc_servers":
-			err = setStrings(&out.RPCServers, k, v)
-		case "device":
-			if str, ok := v.(string); ok {
-				v = splitList(str)
-			}
-			err = setStrings((*[]string)(&out.Device), k, v)
-		case "tensor_split":
-			err = setStr(&out.TensorSplit, k, v)
-		case "split_mode":
-			err = setStr(&out.SplitMode, k, v)
-		case "main_gpu":
-			err = setInt(&out.MainGPU, k, v)
-		case "no_kv_offload":
-			err = setBool(&out.NoKVOffload, k, v)
-		case "moe_expert_cache":
-			err = setInt(&out.MoEExpertCache, k, v)
-		case "moe_expert_cache_inserts":
-			err = setInt(&out.MoEExpertCacheInserts, k, v)
-		case "kv_stream_arena_mib":
-			err = setInt(&out.KVStreamArenaMiB, k, v)
-		case "projector":
-			err = setBool(&out.Projector, k, v)
-		case "embeddings":
-			err = setBool(&out.Embeddings, k, v)
-		case "pooling":
-			err = setStr(&out.Pooling, k, v)
-
-		case "reasoning_effort":
-			err = setStr(&out.ReasoningEffort, k, v)
-		case "temperature":
-			err = setFloat(&out.Temperature, k, v)
-		case "top_k":
-			err = setInt(&out.TopK, k, v)
-		case "top_p":
-			err = setFloat(&out.TopP, k, v)
-		case "min_p":
-			err = setFloat(&out.MinP, k, v)
-		case "repeat_penalty":
-			err = setFloat(&out.RepeatPenalty, k, v)
-		case "seed":
-			err = setInt(&out.Seed, k, v)
-		case "num_predict":
-			err = setInt(&out.NumPredict, k, v)
-		case "stop":
-			err = setStrings(&out.Stop, k, v)
-		case "mirostat":
-			err = setInt(&out.Mirostat, k, v)
-		case "mirostat_tau":
-			err = setFloat(&out.MirostatTau, k, v)
-		case "mirostat_eta":
-			err = setFloat(&out.MirostatEta, k, v)
-		case "presence_penalty":
-			err = setFloat(&out.PresencePenalty, k, v)
-		case "frequency_penalty":
-			err = setFloat(&out.FrequencyPenalty, k, v)
-		case "repeat_last_n":
-			err = setInt(&out.RepeatLastN, k, v)
-		case "typical_p":
-			err = setFloat(&out.TypicalP, k, v)
-		case "num_keep":
-			err = setInt(&out.NumKeep, k, v)
-
-		default:
+		i, ok := optionFields[k]
+		if !ok {
 			// Ignored, as ollama ignores ours.
 			continue
 		}
-		if err != nil {
+		if err := setOption(fields.Field(i).Addr().Interface(), k, v); err != nil {
 			return p, err
 		}
 	}
@@ -127,6 +29,39 @@ func Apply(p Profile, opts map[string]any) (Profile, error) {
 		return p, err
 	}
 	return out, nil
+}
+
+var optionFields = func() map[string]int {
+	t := reflect.TypeFor[Profile]()
+	out := make(map[string]int, t.NumField())
+	for i := range t.NumField() {
+		f := t.Field(i)
+		if key := f.Tag.Get("toml"); key != "" && f.Tag.Get("option") != "-" {
+			out[key] = i
+		}
+	}
+	return out
+}()
+
+func setOption(dst any, key string, v any) error {
+	switch d := dst.(type) {
+	case **int:
+		return setInt(d, key, v)
+	case **float32:
+		return setFloat(d, key, v)
+	case **string:
+		return setStr(d, key, v)
+	case **bool:
+		return setBool(d, key, v)
+	case *[]string:
+		return setStrings(d, key, v)
+	case *StringList:
+		if str, ok := v.(string); ok {
+			v = splitList(str)
+		}
+		return setStrings((*[]string)(d), key, v)
+	}
+	panic(fmt.Sprintf("config: option %q has no setter for %T", key, dst))
 }
 
 // JSON numbers decode as float64.

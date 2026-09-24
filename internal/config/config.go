@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -100,7 +101,7 @@ type Profile struct {
 	AllowPartialOffload *bool `toml:"allow_partial_offload"`
 	// Fail-closed ceiling measured from the child's DRM fdinfo, including caches and graphs.
 	GPUVRAMCapMiB *int    `toml:"gpu_vram_cap_mib"`
-	Parallel      *int    `toml:"parallel"`
+	Parallel      *int    `toml:"parallel" option:"-"`
 	FlashAttn     *string `toml:"flash_attn"`
 	Projector     *bool   `toml:"projector"`
 	Backend       *string `toml:"backend"`
@@ -151,7 +152,8 @@ type Profile struct {
 	TypicalP         *float32 `toml:"typical_p"`
 	NumKeep          *int     `toml:"num_keep"`
 
-	KeepAlive *string `toml:"keep_alive"`
+	// Requests carry keep_alive as a top-level field, not as an option.
+	KeepAlive *string `toml:"keep_alive" option:"-"`
 }
 
 // The profile defaults are the settings the gfx1200-lab benchmarks favoured. There is
@@ -265,72 +267,16 @@ func splitTag(name string) (string, string, bool) {
 	return "", "", false
 }
 
+// Every Profile field is a pointer or a slice, so nil is unset and anything else wins.
 func Merge(base, over Profile) Profile {
 	out := base
-	setIf(&out.NumCtx, over.NumCtx)
-	setIf(&out.CacheTypeK, over.CacheTypeK)
-	setIf(&out.CacheTypeV, over.CacheTypeV)
-	setIf(&out.CacheTypeKDraft, over.CacheTypeKDraft)
-	setIf(&out.CacheTypeVDraft, over.CacheTypeVDraft)
-	setIf(&out.NumBatch, over.NumBatch)
-	setIf(&out.NumUBatch, over.NumUBatch)
-	setIf(&out.LoadMode, over.LoadMode)
-	setIf(&out.SpecType, over.SpecType)
-	setIf(&out.SpecDraftNMax, over.SpecDraftNMax)
-	setIf(&out.SpecDraftNMin, over.SpecDraftNMin)
-	setIf(&out.NumGPU, over.NumGPU)
-	setIf(&out.AllowPartialOffload, over.AllowPartialOffload)
-	setIf(&out.GPUVRAMCapMiB, over.GPUVRAMCapMiB)
-	setIf(&out.Parallel, over.Parallel)
-	setIf(&out.FlashAttn, over.FlashAttn)
-	setIf(&out.Projector, over.Projector)
-	setIf(&out.Backend, over.Backend)
-	setIf(&out.NumCPUMoE, over.NumCPUMoE)
-	setIf(&out.MoEExpertCache, over.MoEExpertCache)
-	setIf(&out.MoEExpertCacheInserts, over.MoEExpertCacheInserts)
-	setIf(&out.KVStreamArenaMiB, over.KVStreamArenaMiB)
-	setIf(&out.Embeddings, over.Embeddings)
-	setIf(&out.Pooling, over.Pooling)
-	setIf(&out.ReasoningEffort, over.ReasoningEffort)
-	setIf(&out.Temperature, over.Temperature)
-	setIf(&out.TopK, over.TopK)
-	setIf(&out.TopP, over.TopP)
-	setIf(&out.MinP, over.MinP)
-	setIf(&out.RepeatPenalty, over.RepeatPenalty)
-	setIf(&out.Seed, over.Seed)
-	setIf(&out.NumPredict, over.NumPredict)
-	setIf(&out.Mirostat, over.Mirostat)
-	setIf(&out.MirostatTau, over.MirostatTau)
-	setIf(&out.MirostatEta, over.MirostatEta)
-	setIf(&out.PresencePenalty, over.PresencePenalty)
-	setIf(&out.FrequencyPenalty, over.FrequencyPenalty)
-	setIf(&out.RepeatLastN, over.RepeatLastN)
-	setIf(&out.TypicalP, over.TypicalP)
-	setIf(&out.NumKeep, over.NumKeep)
-	setIf(&out.KeepAlive, over.KeepAlive)
-	if over.Stop != nil {
-		out.Stop = over.Stop
+	dst, src := reflect.ValueOf(&out).Elem(), reflect.ValueOf(over)
+	for i := range src.NumField() {
+		if f := src.Field(i); !f.IsNil() {
+			dst.Field(i).Set(f)
+		}
 	}
-	if over.OverrideTensor != nil {
-		out.OverrideTensor = over.OverrideTensor
-	}
-	if over.RPCServers != nil {
-		out.RPCServers = over.RPCServers
-	}
-	if over.Device != nil {
-		out.Device = over.Device
-	}
-	setIf(&out.TensorSplit, over.TensorSplit)
-	setIf(&out.SplitMode, over.SplitMode)
-	setIf(&out.MainGPU, over.MainGPU)
-	setIf(&out.NoKVOffload, over.NoKVOffload)
 	return out
-}
-
-func setIf[T any](dst **T, src *T) {
-	if src != nil {
-		*dst = src
-	}
 }
 
 func ptr[T any](v T) *T { return &v }
