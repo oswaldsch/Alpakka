@@ -3,7 +3,6 @@ package supervisor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -319,8 +318,6 @@ func describeChange(old, new config.Runtime) string {
 	}
 	return out
 }
-
-var errStopped = errors.New("llama-server stopped")
 
 // Readiness probes only, generation uses its own client with no timeout.
 var httpClient = &http.Client{Timeout: 2 * time.Second}

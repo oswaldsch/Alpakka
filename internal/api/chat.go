@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -253,8 +252,6 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(keys)
 	return keys
 }
-
-func errorsAs(err error, target any) bool { return errors.As(err, target) }
 
 // The benchmark harness greps this to resolve a model's blob path.
 func modelfile(m *store.Model) string {

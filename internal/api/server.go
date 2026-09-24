@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -314,9 +315,9 @@ func writeResolveError(w http.ResponseWriter, name string, err error) {
 	var nf errModelNotFound
 	var bad errBadRequest
 	switch {
-	case errorsAs(err, &nf):
+	case errors.As(err, &nf):
 		writeModelNotFound(w, name)
-	case errorsAs(err, &bad):
+	case errors.As(err, &bad):
 		writeError(w, http.StatusBadRequest, bad.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())

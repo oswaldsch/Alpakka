@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -133,7 +134,7 @@ func (s *Server) handleBench(w http.ResponseWriter, r *http.Request) {
 		run, sample, err := s.benchOnce(r, inst, profile, prompt, req.IgnoreEOS == nil || *req.IgnoreEOS)
 		if err != nil {
 			var up errUpstream
-			if errorsAs(err, &up) {
+			if errors.As(err, &up) {
 				writeError(w, up.status, up.Error())
 			} else {
 				writeError(w, http.StatusBadGateway, err.Error())

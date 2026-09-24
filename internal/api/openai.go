@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -205,9 +206,9 @@ func writeOpenAIResolveError(w http.ResponseWriter, name string, err error) {
 	var bad errBadRequest
 	status, msg := http.StatusInternalServerError, err.Error()
 	switch {
-	case errorsAs(err, &nf):
+	case errors.As(err, &nf):
 		status, msg = http.StatusNotFound, "model '"+name+"' not found"
-	case errorsAs(err, &bad):
+	case errors.As(err, &bad):
 		status = http.StatusBadRequest
 	}
 	// OpenAI clients read errors from a nested object.
