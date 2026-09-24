@@ -2,10 +2,12 @@ module github.com/oswald/alpakka
 
 go 1.27.0
 
-require github.com/ollama/ollama v0.32.0
+require (
+	github.com/BurntSushi/toml v1.6.0
+	github.com/ollama/ollama v0.32.0
+)
 
 require (
-	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
