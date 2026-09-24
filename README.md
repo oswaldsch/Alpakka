@@ -31,26 +31,24 @@ variable and no Modelfile parameter for either:
   `xhigh` to `low` took one coding request from 62 s to 18 s.
 
 alpakka does not fork ollama. It reads models off disk, supervises one
-`llama-server` process, and speaks ollama's wire API back out. Its own store is
-a directory of GGUF files; ollama's blob and manifest layout is still read, so
-the two coexist and nothing has to be moved.
+`llama-server` process, and speaks ollama's wire API back out. Its store is a
+directory of GGUF files.
 
 `llama-swap` was evaluated and rejected: it supervises llama-server well but is
-OpenAI-only, with no `/api/tags`, `/api/chat` or ollama NDJSON, and it does not
-read ollama's store. It would have saved the supervisor and left the hard part —
+OpenAI-only, with no `/api/tags`, `/api/chat` or ollama NDJSON. It would have saved the supervisor and left the hard part —
 wire compatibility — unwritten.
 
 ## Design
 
 llama-server runs with `--jinja` and applies the model's own chat template.
-alpakka never renders a template; it reads ollama's template layer only to
-display it in `/api/show`. This is load-bearing: `chat_template_kwargs` exists
+alpakka never renders a template; it reads the GGUF's only to display it in
+`/api/show`. This matters: `chat_template_kwargs` exists
 only on the jinja path, so that is where `reasoning_effort` lives. It also
 reduces the hard problem to one translator between ollama's chat shape and
 OpenAI's, and makes `/v1/*` a near-passthrough.
 
 - `internal/gguf` — GGUF metadata and tensor-shape reader.
-- `internal/store` — model sources: a GGUF directory and ollama's own layout.
+- `internal/store` — model roots: directories of GGUF files.
 - `internal/hub` — pulling GGUFs from HuggingFace.
 - `internal/config` — TOML profiles, and the request/process split.
 - `internal/supervisor` — the llama-server child: launch, fit check, eviction.
@@ -64,15 +62,14 @@ OpenAI's, and makes `/v1/*` a near-passthrough.
 ./setup.sh
 ```
 
-Builds alpakka, installs it into `~/.local/bin`, finds the llama.cpp build and
-the ollama model store on this machine, writes `~/.config/alpakka/config.toml`
-pointing at them, installs a systemd user unit and starts it — then waits for
+Builds alpakka, installs it into `~/.local/bin`, finds the llama.cpp build on
+this machine, creates `~/models` if needed, writes
+`~/.config/alpakka/config.toml` pointing at both, installs a systemd user unit and starts it — then waits for
 the API to answer before claiming success. Re-run it to pick up a new build.
 
 It needs a `llama-server` from llama.cpp, recent enough for `--fit` and
-`--spec-type`, and it checks for those flags before installing anything: a
-current ollama does not ship a llama-server at all (its runner lives inside the
-`ollama` binary), and distro packages tend to be a year behind.
+`--spec-type`, and it checks for those flags before installing anything:
+distro packages tend to be a year behind.
 
 `--system` installs to `/usr/local/bin`, `/etc/alpakka` and
 `/etc/systemd/system` instead. `--dry-run` prints everything it would do,
@@ -81,7 +78,7 @@ including the unit. Detection can be overridden with `--lib-dir`, `--backend`,
 the rest.
 
 The checks it makes are the ones whose absence is expensive: that the service
-user can actually read the model store, and that it can open `/dev/kfd` and
+user can actually read the model root, and that it can open `/dev/kfd` and
 `/dev/dri`. Failing either, llama-server still starts — on CPU, at a few tokens
 a second, silently.
 
@@ -99,7 +96,7 @@ Point any ollama client at it:
 
 ```bash
 OLLAMA_HOST=127.0.0.1:11435 ollama list
-OLLAMA_HOST=127.0.0.1:11435 ollama run qwen3.8-27b-q3-32k "..."
+OLLAMA_HOST=127.0.0.1:11435 ollama run qwen3.8-27b:q3-k-xl "..."
 ```
 
 ## Models
@@ -111,7 +108,7 @@ name is the directory, so `~/models/qwen3.8-27b/iq3-xxs.gguf` is
 tag. Everything `/api/show` reports comes out of the GGUF header; system
 prompts and parameters come from `config.toml` rather than from the store.
 
-`alpakka pull` fetches a GGUF from HuggingFace into the first plain root:
+`alpakka pull` fetches a GGUF from HuggingFace into the first root:
 
 ```bash
 alpakka pull https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/blob/main/Qwen3.8-27B-UD-IQ3_XXS.gguf
@@ -122,12 +119,6 @@ alpakka pull unsloth/Qwen3.8-27B-GGUF:UD-IQ3_XXS      # -> qwen3.8-27b:iq3-xxs
 It resumes an interrupted download, fetches every part of a split model, offers
 the repo's projector when there is one, and refuses to replace an existing tag
 without `-f`. `HF_TOKEN` is used for gated repos.
-
-`alpakka import --from-ollama` gives ollama's existing blobs readable names by
-hardlinking them into the layout. It never copies, so it costs nothing and
-undoes with `rm`. It lists what it would do and needs `--apply` to act. The
-blobs are usually owned by the `ollama` user, and `fs.protected_hardlinks`
-stops anyone else linking them, so this wants `sudo`.
 
 `alpakka list` (or `ls`) and `alpakka ps` print what the running server can
 serve and what it has loaded. They ask the server rather than the store, since
@@ -149,14 +140,13 @@ listen = "127.0.0.1:11435"
 
 [store]
 # Searched in order; the first root holding a name serves it, and a shadowed
-# copy is logged. A root with a manifests/ directory is read as an ollama
-# store, anything else as <root>/<name>/<tag>.gguf. Omitted, this is exactly
-# what alpakka uses. `alpakka pull` writes into the first plain directory.
-roots = ["~/models", "/var/lib/ollama/.ollama/models"]
+# copy is logged. Omitted, this is ["~/models"]. `alpakka pull` writes into
+# the first root.
+roots = ["~/models"]
 
 [llama]
-lib_dir = "/usr/local/lib/ollama"
-backend = "rocm_v7_2"          # or "vulkan"
+lib_dir = "/opt/llama.cpp/bin"   # the directory holding llama-server, required
+backend = "."                    # ggml backend subdirectory, e.g. "vulkan"
 
 [defaults]
 num_ctx = 32768
@@ -164,7 +154,7 @@ cache_type_k = "q8_0"
 cache_type_v = "q8_0"
 keep_alive = "5m"
 
-[models."qwen3.8-27b-q3-32k"]
+[models."qwen3.8-27b:q3-k-xl"]
 spec_type = "draft-mtp"
 spec_draft_n_max = 2
 reasoning_effort = "low"
@@ -257,7 +247,7 @@ cards, and `no_kv_offload` is the only way to put it in host RAM (at a large
 decode cost). Anything left unset passes nothing.
 
 ```toml
-device = ["Vulkan1", "Vulkan0"]   # 9060 XT first, then the RX 570
+device = ["Vulkan1", "Vulkan0"]
 tensor_split = "12,6"
 ```
 
@@ -311,7 +301,7 @@ OpenAI client can reach it.
 
 ```bash
 curl -s localhost:11435/alpakka/bench -d '{
-  "model": "qwen3.8-27b-q3-32k",
+  "model": "qwen3.8-27b:q3-k-xl",
   "options": {"spec_type": "draft-mtp", "spec_draft_n_max": 2, "num_predict": 300},
   "prompt_tokens": 2048,
   "runs": 3
@@ -407,16 +397,15 @@ command-line act, not an HTTP one. Also no auth and no concurrent models.
 - **Capabilities follow `/api/show`, not `/api/tags`.** Ollama's two endpoints
   disagree: `/api/tags` answers from a cache built at pull time, while
   `/api/show` computes live. For `gemma4:e4b`, show reports audio and vision and
-  tags reports neither. alpakka matches `/api/show` for all 22 local models,
+  tags reports neither. alpakka computes both from the GGUF, like `/api/show`,
   because that is the endpoint clients query before deciding to send tools.
 - **`context_length` is reported where ollama reports zero.** Ollama's metadata
   reader gives up on the gemma4 omni models, whose headers carry `vision.*` and
   `audio.*` sub-configs. The keys are present and correct, so alpakka reports
   them.
-- **Models declaring a `renderer`/`parser` are rendered by llama.cpp.** Ollama
-  renders these (gemma4, qwen3.5, qwen3.6 in this store) with a built-in Go
-  renderer. alpakka hands them to the GGUF's own jinja template instead, which
-  may format prompts differently. Reimplementing ollama's renderer registry
+- **Every prompt is rendered by the GGUF's jinja template.** Ollama renders some
+  families (gemma4, qwen3.5, qwen3.6) with built-in Go renderers, which may
+  format prompts differently. Reimplementing ollama's renderer registry
   would be the permanent rebase tax this project exists to avoid.
 - **`/api/generate` does not return `context`.** The token-id conversation
   handle has no equivalent on llama.cpp's OpenAI surface. It is deprecated in
@@ -429,10 +418,11 @@ go test ./...
 ```
 
 Wire compatibility is checked against real captures, not recollection:
-`internal/store/testdata` holds `/api/tags` and `/api/show` from a live ollama,
-and `internal/translate/testdata` holds both ollama's NDJSON and the target
+`internal/translate/testdata` holds both ollama's NDJSON and the target
 llama-server's SSE. The supervisor tests drive a real `llama-server` and assert
-the process is genuinely gone after a reload.
+the process is genuinely gone after a reload. They use the llama.cpp build and
+the smallest model from the installed `config.toml` (or `ALPAKKA_LLAMA_LIB_DIR`
+and `ALPAKKA_LLAMA_BACKEND`), and skip without one.
 
 Verified against the official `ollama` CLI and Python client, not only curl.
 

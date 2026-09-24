@@ -8,12 +8,11 @@ that need to operate it without first reading the codebase.
 
 Alpakka is an Ollama-compatible HTTP front end for a supervised `llama-server`.
 It does **not** fork Ollama, render chat templates, or run an Ollama inference
-process. Models are added only from the command line (`alpakka pull`,
-`alpakka import --from-ollama`), never over HTTP. It:
+process. Models are added only from the command line (`alpakka pull`), never
+over HTTP. It:
 
-1. reads models read-only from its roots: a `<name>/<tag>.gguf` directory
-   and/or Ollama's on-disk store;
-2. resolves a requested tag to its GGUF, template, projector, and metadata;
+1. reads models read-only from its roots, each a `<name>/<tag>.gguf` directory;
+2. resolves a requested tag to its GGUF, projector, and metadata;
 3. merges global, per-model, and per-request settings;
 4. starts exactly one `llama-server` with the required process-level flags;
 5. proxies OpenAI requests or translates Ollama requests and streams the result
@@ -23,28 +22,24 @@ The point is to expose llama.cpp controls Ollama cannot: MTP speculative decode,
 Jinja `chat_template_kwargs`, explicit KV quantization, strict no-spill loading,
 optional RPC placement, and experimental KV/MoE controls.
 
-## This machine
+## Where things live
 
-- GPU: Radeon RX 9060 XT 16 GB (16,304 MiB usable), ROCm, `gfx1200`.
+These are the `setup.sh` defaults. Check the unit and config before trusting them.
+
 - Alpakka: `127.0.0.1:11435`.
-- Writable Ollama daemon/model management: `127.0.0.1:11434`.
-- Config: `~/.config/alpakka/config.toml`.
+- Config: `~/.config/alpakka/config.toml`. `[llama] lib_dir` names the
+  llama.cpp build in use.
 - Service: `~/.config/systemd/user/alpakka.service`.
 - Binary: `~/.local/bin/alpakka`.
-- llama.cpp build: `~/code/llama.cpp/build/bin` in the current install.
-- Ollama store: `/var/lib/ollama/.ollama/models`.
+- Models: `~/models`, unless `[store] roots` says otherwise.
 
-Use port 11435 for inference and inspection. Add plain GGUFs with
-`alpakka pull`, or use port 11434 for `ollama pull` and `ollama create`.
+Use port 11435 for inference and inspection. Add models with `alpakka pull`.
 Alpakka intentionally returns 501 for store mutations over HTTP.
 
 ```bash
 OLLAMA_HOST=http://127.0.0.1:11435 ollama list
-OLLAMA_HOST=http://127.0.0.1:11434 ollama pull gpt-oss:20b
+alpakka pull unsloth/Qwen3.8-27B-GGUF:UD-Q3_K_XL
 ```
-
-Pulling through 11434 writes to disk and does not itself load or unload the
-model being served by Alpakka.
 
 ## Configuration and precedence
 
@@ -59,14 +54,10 @@ built-in defaults
 
 A tagged model can inherit a bare-name profile. Explicit request values win.
 
-**Ollama Modelfile params are not part of this runtime merge.** Alpakka reads
-the manifest params layer for `/api/show` and generated Modelfile output, but
-sampling/runtime defaults used for inference come from `config.toml` and the
-request. Therefore `PARAMETER temperature 0.3` may appear in `/api/show` without
-making 0.3 the Alpakka default. Put it in TOML or send it per request:
+Sampling and runtime defaults come only from `config.toml` and the request:
 
 ```toml
-[models."qwen3.8-27b-q3-64k:latest"]
+[models."qwen3.8-27b:q3-k-xl"]
 temperature = 0.3
 ```
 
@@ -77,9 +68,6 @@ Changing any process-level value produces a different comparable runtime and
 therefore reloads. A reload waits for active responses to finish; it never
 truncates an in-flight stream.
 
-The current Qwen profiles are 32K, 64K, and 128K tags with Q4_0 K/V cache,
-`draft-mtp`, `spec_draft_n_max = 2`, low reasoning effort, and no projector.
-Check the TOML rather than trusting this sentence after future tuning.
 
 ## Model lifecycle
 
@@ -104,8 +92,7 @@ and a wrong cwd can make ROCm libraries disappear and silently run on CPU.
 ## Templates and reasoning
 
 llama-server runs with `--jinja` and renders the GGUF's own template. Alpakka
-does not render the Ollama template layer; `/api/show` displaying a template is
-not proof that this is the template llama.cpp executes.
+never renders a template itself.
 
 `reasoning_effort` is passed as a Jinja `chat_template_kwargs` value and accepts
 only `low`, `medium`, or `xhigh`. Ollama `think: "high"` maps explicitly to
@@ -140,14 +127,14 @@ VRAM consists of more than the GGUF size:
 
 ```text
 weights + target KV + MTP draft KV + compute/scratch + graphs + projector
-        + ROCm allocation overhead + desktop compositor headroom
+        + driver allocation overhead + desktop compositor headroom
 ```
 
 KV use grows roughly linearly with `num_ctx`. Q4 KV is about half Q8 KV. MTP's
 draft cache remains additional VRAM. A projector reserves substantial VRAM even
 if a request has no image, which is why `projector = false` is important here.
-At 64K Q4 plus MTP this machine has only a few hundred MiB of headroom; normal
-Plasma/Wayland allocation changes can decide whether a load fits.
+On a 16 GB card a large profile can leave only a few hundred MiB of headroom,
+so desktop allocation changes can decide whether a load fits.
 
 Typical expected failure:
 
@@ -162,7 +149,7 @@ supervisor retains notable error lines and returns them to the client. It also
 fails closed if llama.cpp stops printing the `offloaded N/N layers to GPU`
 line, because otherwise a changed log format could disable spill detection.
 
-On this AMD machine, inspect real VRAM ownership with:
+On AMD GPUs, inspect real VRAM ownership with:
 
 ```bash
 amdgpu_top -p
@@ -184,7 +171,7 @@ counts and cannot bypass output limits.
 Endpoints, embedding behavior and the known divergences from Ollama are under
 Scope and Known divergences in `README.md`. Store mutations (`/api/pull`,
 `/api/create`, `/api/push`, `/api/copy`, `/api/delete`) return 501: use
-`alpakka pull`, or Ollama on 11434.
+`alpakka pull`.
 
 Ollama chat/generate requests are translated to llama-server's streaming
 OpenAI chat endpoint. llama-server is always asked to stream; Alpakka either
@@ -237,8 +224,6 @@ llama-server PID actually exited.
 
 - Do not benchmark by reading or copying sibling implementations first.
 - Do not send a generation merely to inspect configuration or health.
-- Do not point model-management commands at port 11435.
-- Do not assume `/api/show` Modelfile params are effective Alpakka defaults.
 - Do not change process-level options during a latency measurement; that adds a
   reload unless the running runtime already matches.
 - Do not interpret `keep_alive = "5m"` as a five-minute request timeout.
