@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/oswald/alpakka/internal/gguf"
+	"github.com/oswaldsch/alpakka/internal/gguf"
 )
 
 // An ambiguous name is an answer, not a miss, so it must not send the lookup on

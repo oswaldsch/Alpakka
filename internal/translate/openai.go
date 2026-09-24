@@ -8,7 +8,7 @@ import (
 
 	"github.com/ollama/ollama/api"
 
-	"github.com/oswald/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/config"
 )
 
 type Request struct {

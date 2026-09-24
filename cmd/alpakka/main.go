@@ -14,10 +14,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/oswald/alpakka/internal/api"
-	"github.com/oswald/alpakka/internal/config"
-	"github.com/oswald/alpakka/internal/store"
-	"github.com/oswald/alpakka/internal/supervisor"
+	"github.com/oswaldsch/alpakka/internal/api"
+	"github.com/oswaldsch/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/store"
+	"github.com/oswaldsch/alpakka/internal/supervisor"
 )
 
 func main() {

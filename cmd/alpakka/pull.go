@@ -11,9 +11,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/oswald/alpakka/internal/config"
-	"github.com/oswald/alpakka/internal/hub"
-	"github.com/oswald/alpakka/internal/store"
+	"github.com/oswaldsch/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/hub"
+	"github.com/oswaldsch/alpakka/internal/store"
 )
 
 const pullUsage = `alpakka pull <ref>

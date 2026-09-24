@@ -11,8 +11,8 @@ import (
 
 	"github.com/ollama/ollama/api"
 
-	"github.com/oswald/alpakka/internal/config"
-	"github.com/oswald/alpakka/internal/translate"
+	"github.com/oswaldsch/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/translate"
 )
 
 // llama-server already speaks /v1, so alpakka only routes to the right model and folds in the configured defaults.

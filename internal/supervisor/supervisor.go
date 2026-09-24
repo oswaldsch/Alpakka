@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/oswald/alpakka/internal/config"
-	"github.com/oswald/alpakka/internal/wol"
+	"github.com/oswaldsch/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/wol"
 )
 
 type Logf func(format string, args ...any)

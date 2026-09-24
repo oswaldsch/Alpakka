@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oswald/alpakka/internal/store"
+	"github.com/oswaldsch/alpakka/internal/store"
 )
 
 func ggufFile(pad int) []byte {

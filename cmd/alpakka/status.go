@@ -12,7 +12,7 @@ import (
 
 	"github.com/ollama/ollama/api"
 
-	"github.com/oswald/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/config"
 )
 
 // Both ask the running server rather than reading the store, since its -models flag

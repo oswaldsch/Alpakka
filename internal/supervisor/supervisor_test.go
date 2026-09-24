@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oswald/alpakka/internal/config"
-	"github.com/oswald/alpakka/internal/store"
+	"github.com/oswaldsch/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/store"
 )
 
 // Runs against the installed alpakka's own llama.cpp build and model roots,

@@ -10,9 +10,9 @@ import (
 
 	"github.com/ollama/ollama/api"
 
-	"github.com/oswald/alpakka/internal/config"
-	"github.com/oswald/alpakka/internal/supervisor"
-	"github.com/oswald/alpakka/internal/translate"
+	"github.com/oswaldsch/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/supervisor"
+	"github.com/oswaldsch/alpakka/internal/translate"
 )
 
 // Options is ollama's options object, so every process-level setting is benchmarkable

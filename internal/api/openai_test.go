@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oswald/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/config"
 )
 
 // Only model/options/keep_alive/profile are inspected, so a large unrelated field like messages

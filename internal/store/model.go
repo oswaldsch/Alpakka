@@ -8,7 +8,7 @@ import (
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/types/model"
 
-	"github.com/oswald/alpakka/internal/gguf"
+	"github.com/oswaldsch/alpakka/internal/gguf"
 )
 
 type Model struct {

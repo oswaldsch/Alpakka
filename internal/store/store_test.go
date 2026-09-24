@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oswald/alpakka/internal/gguf/gguftest"
+	"github.com/oswaldsch/alpakka/internal/gguf/gguftest"
 
 	"github.com/ollama/ollama/types/model"
 )

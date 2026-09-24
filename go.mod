@@ -1,4 +1,4 @@
-module github.com/oswald/alpakka
+module github.com/oswaldsch/alpakka
 
 go 1.27.0
 

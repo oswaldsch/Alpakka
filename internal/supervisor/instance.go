@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/oswald/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/config"
 )
 
 type Instance struct {

@@ -3,7 +3,7 @@ package supervisor
 import (
 	"strconv"
 
-	"github.com/oswald/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/config"
 )
 
 // High enough to print the "offloaded N/M layers to GPU" line, which the fit check reads.

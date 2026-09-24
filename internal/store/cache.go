@@ -3,7 +3,7 @@ package store
 import (
 	"sync"
 
-	"github.com/oswald/alpakka/internal/gguf"
+	"github.com/oswaldsch/alpakka/internal/gguf"
 )
 
 // A header parse walks the whole tensor table, and /api/ps is polled while every

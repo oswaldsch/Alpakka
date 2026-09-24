@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oswald/alpakka/internal/gguf/gguftest"
+	"github.com/oswaldsch/alpakka/internal/gguf/gguftest"
 )
 
 func layered(t *testing.T) *Store {

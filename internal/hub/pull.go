@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/oswald/alpakka/internal/store"
+	"github.com/oswaldsch/alpakka/internal/store"
 )
 
 type Target struct {

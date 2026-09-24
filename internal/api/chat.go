@@ -10,9 +10,9 @@ import (
 
 	"github.com/ollama/ollama/api"
 
-	"github.com/oswald/alpakka/internal/gguf"
-	"github.com/oswald/alpakka/internal/store"
-	"github.com/oswald/alpakka/internal/translate"
+	"github.com/oswaldsch/alpakka/internal/gguf"
+	"github.com/oswaldsch/alpakka/internal/store"
+	"github.com/oswaldsch/alpakka/internal/translate"
 )
 
 // Generation has no meaningful timeout, since a long completion at 25 tokens a second is normal.

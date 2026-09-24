@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oswald/alpakka/internal/config"
-	"github.com/oswald/alpakka/internal/hub"
+	"github.com/oswaldsch/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/hub"
 )
 
 func discardLogger() *log.Logger { return log.New(io.Discard, "", 0) }

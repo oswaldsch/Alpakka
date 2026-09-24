@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oswald/alpakka/internal/gguf/gguftest"
+	"github.com/oswaldsch/alpakka/internal/gguf/gguftest"
 
 	ollama "github.com/ollama/ollama/api"
 
-	"github.com/oswald/alpakka/internal/config"
-	"github.com/oswald/alpakka/internal/store"
-	"github.com/oswald/alpakka/internal/supervisor"
+	"github.com/oswaldsch/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/store"
+	"github.com/oswaldsch/alpakka/internal/supervisor"
 )
 
 // Only endpoints that need no loaded model are exercised, the supervisor has its own tests.

@@ -15,9 +15,9 @@ import (
 
 	"github.com/ollama/ollama/api"
 
-	"github.com/oswald/alpakka/internal/config"
-	"github.com/oswald/alpakka/internal/store"
-	"github.com/oswald/alpakka/internal/supervisor"
+	"github.com/oswaldsch/alpakka/internal/config"
+	"github.com/oswaldsch/alpakka/internal/store"
+	"github.com/oswaldsch/alpakka/internal/supervisor"
 )
 
 // Clients gate features on it, so it claims compatibility with the ollama release the types come from.
