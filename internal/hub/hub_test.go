@@ -191,7 +191,7 @@ func TestPullWritesTheStoreLayout(t *testing.T) {
 		t.Error("the .part file survived a finished download")
 	}
 
-	m, err := store.NewDir(root).Get("qwen3.8-27b:iq3-xxs")
+	m, err := store.New(nil, root).Get("qwen3.8-27b:iq3-xxs")
 	if err != nil {
 		t.Fatal(err)
 	}

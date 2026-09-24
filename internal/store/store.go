@@ -3,36 +3,87 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/oswald/alpakka/internal/gguf"
 )
 
-// Layout is <root>/<name>/<tag>.gguf and a name may nest. A sibling <tag>.mmproj.gguf is
-// the vision projector, and llama.cpp splits keep their <tag>-00001-of-0000N.gguf naming.
-type DirStore struct {
-	root  string
+// An ambiguous name is an answer, not a miss, so it must not send the lookup on
+// to the next root.
+var ErrNotFound = errors.New("model not found")
+
+func DefaultRoots() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return []string{filepath.Join(home, "models")}
+}
+
+// Each root is laid out as <root>/<name>/<tag>.gguf and a name may nest. A sibling
+// <tag>.mmproj.gguf is the vision projector, and llama.cpp splits keep their
+// <tag>-00001-of-0000N.gguf naming.
+type Store struct {
+	roots []string
 	cache *ggufCache
+	logf  func(string, ...any)
+
+	mu     sync.Mutex
+	warned map[string]bool
 }
 
-func NewDir(root string) *DirStore {
-	return &DirStore{root: root, cache: newGGUFCache()}
+func New(logf func(string, ...any), roots ...string) *Store {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	return &Store{roots: roots, cache: newGGUFCache(), logf: logf, warned: map[string]bool{}}
 }
-
-func (s *DirStore) Root() string { return s.root }
 
 type tagFiles struct {
 	parts     []string
 	projector string
 }
 
-func (s *DirStore) List() ([]Model, error) {
-	dirs, err := s.scan()
+func (s *Store) List() ([]Model, error) {
+	var out []Model
+	seen := map[string]bool{}
+	var firstErr error
+
+	for _, root := range s.roots {
+		models, err := s.listRoot(root)
+		if err != nil {
+			// One unreadable root should not blank out /api/tags for the rest.
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		for _, m := range models {
+			if seen[m.Name] {
+				s.warnShadowed(m)
+				continue
+			}
+			seen[m.Name] = true
+			out = append(out, m)
+		}
+	}
+	if out == nil && firstErr != nil {
+		return nil, firstErr
+	}
+
+	sortNewestFirst(out)
+	return out, nil
+}
+
+func (s *Store) listRoot(root string) ([]Model, error) {
+	dirs, err := s.scan(root)
 	if err != nil {
 		return nil, err
 	}
@@ -49,21 +100,34 @@ func (s *DirStore) List() ([]Model, error) {
 			models = append(models, *m)
 		}
 	}
-
-	sortNewestFirst(models)
 	return models, nil
 }
 
-func (s *DirStore) Get(name string) (*Model, error) {
+// Only a miss falls through. A root that cannot decide which tag was meant has
+// answered, and searching on would serve a different model.
+func (s *Store) Get(name string) (*Model, error) {
+	for _, root := range s.roots {
+		m, err := s.getIn(root, name)
+		if err == nil {
+			return m, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("%q: %w", name, ErrNotFound)
+}
+
+func (s *Store) getIn(root, name string) (*Model, error) {
 	repo, want := splitName(name)
 	rel, ok := safeRel(repo)
 	if !ok {
-		return nil, fmt.Errorf("%q: %w", name, ErrNotFound)
+		return nil, ErrNotFound
 	}
 
-	tags, err := s.scanDir(filepath.Join(s.root, rel))
+	tags, err := s.scanDir(filepath.Join(root, rel))
 	if err != nil || len(tags) == 0 {
-		return nil, fmt.Errorf("%q: %w", name, ErrNotFound)
+		return nil, ErrNotFound
 	}
 
 	if want == "" {
@@ -76,50 +140,40 @@ func (s *DirStore) Get(name string) (*Model, error) {
 	}
 	files, ok := tags[want]
 	if !ok {
-		return nil, fmt.Errorf("%q: %w", name, ErrNotFound)
+		return nil, ErrNotFound
 	}
 	return s.model(repo, want, files)
 }
 
-func (s *DirStore) Tags(name string) []string {
-	rel, ok := safeRel(name)
-	if !ok {
-		return nil
+func (s *Store) warnShadowed(m Model) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.warned[m.Name] {
+		return
 	}
-	tags, err := s.scanDir(filepath.Join(s.root, rel))
-	if err != nil {
-		return nil
-	}
-	return sortedKeys(tags)
+	s.warned[m.Name] = true
+	s.logf("model %s: shadowed copy at %s is not served", m.Name, m.ModelPath)
 }
 
-func (s *DirStore) Path(name, tag string) (string, bool) {
-	rel, ok := safeRel(name)
-	if !ok || !safeSegment(tag) {
-		return "", false
-	}
-	return filepath.Join(s.root, rel, tag+".gguf"), true
-}
-
-func (s *DirStore) scan() (map[string]map[string]tagFiles, error) {
+func (s *Store) scan(root string) (map[string]map[string]tagFiles, error) {
 	out := map[string]map[string]tagFiles{}
 
-	err := filepath.WalkDir(s.root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			if p == s.root {
+			if p == root {
 				return err
 			}
 			// An unreadable subdirectory is not a reason to report no models.
 			return nil
 		}
-		if !d.IsDir() || p == s.root {
+		if !d.IsDir() || p == root {
 			return nil
 		}
 		tags, err := s.scanDir(p)
 		if err != nil || len(tags) == 0 {
 			return nil
 		}
-		rel, err := filepath.Rel(s.root, p)
+		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			return nil
 		}
@@ -132,7 +186,7 @@ func (s *DirStore) scan() (map[string]map[string]tagFiles, error) {
 	return out, nil
 }
 
-func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
+func (s *Store) scanDir(dir string) (map[string]tagFiles, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -212,7 +266,7 @@ func (s *DirStore) scanDir(dir string) (map[string]tagFiles, error) {
 	return out, nil
 }
 
-func (s *DirStore) model(name, tag string, files tagFiles) (*Model, error) {
+func (s *Store) model(name, tag string, files tagFiles) (*Model, error) {
 	m := &Model{
 		Name:          name + ":" + tag,
 		ModelPath:     files.parts[0],
@@ -239,25 +293,11 @@ func (s *DirStore) model(name, tag string, files tagFiles) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	m.Config = ggufConfig(f)
 	// llama.cpp reads the template from the GGUF itself. It is carried here only so
 	// /api/show can render a Modelfile.
 	m.Template, _ = f.String("tokenizer.chat_template")
 	m.Digest = headerDigest(m.Name, m.Size, f)
 	return m, nil
-}
-
-func ggufConfig(f *gguf.File) Config {
-	cfg := Config{ModelFormat: "gguf", FileType: "unknown"}
-	if arch := f.Architecture(); arch != "" {
-		cfg.ModelFamily = arch
-		cfg.ModelFamilies = []string{arch}
-	}
-	cfg.ModelType = gguf.HumanParams(f.ParameterCount())
-	if ft, ok := f.Uint("general.file_type"); ok {
-		cfg.FileType = gguf.FileTypeName(ft)
-	}
-	return cfg
 }
 
 // Clients key caches on it, so it must survive restarts and change when weights are
@@ -349,5 +389,3 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(keys)
 	return keys
 }
-
-var _ Source = (*DirStore)(nil)

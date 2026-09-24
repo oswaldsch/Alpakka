@@ -46,11 +46,7 @@ func smallModel(t *testing.T) *store.Model {
 	if len(roots) == 0 {
 		roots = store.DefaultRoots()
 	}
-	var sources []store.Source
-	for _, r := range roots {
-		sources = append(sources, store.NewDir(r))
-	}
-	models, err := store.NewMulti(nil, sources...).List()
+	models, err := store.New(nil, roots...).List()
 	if err != nil {
 		t.Skipf("model roots: %v", err)
 	}

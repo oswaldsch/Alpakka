@@ -84,7 +84,7 @@ func serve(args []string) error {
 
 	sup := supervisor.New(cfg.Llama, cfg.WoL, logger.Printf)
 	srv := &api.Server{
-		Store:  store.NewMulti(logger.Printf, roots...),
+		Store:  store.New(logger.Printf, roots...),
 		Config: cfg,
 		Super:  sup,
 		Logger: logger,
@@ -128,7 +128,7 @@ func serve(args []string) error {
 }
 
 // A configured root that does not exist yet is skipped, not fatal.
-func openRoots(cfg config.Config, override string, logger *log.Logger) ([]store.Source, error) {
+func openRoots(cfg config.Config, override string, logger *log.Logger) ([]string, error) {
 	roots := cfg.Store.Roots
 	if override != "" {
 		roots = []string{override}
@@ -137,17 +137,17 @@ func openRoots(cfg config.Config, override string, logger *log.Logger) ([]store.
 		roots = store.DefaultRoots()
 	}
 
-	var sources []store.Source
+	var readable []string
 	for _, root := range roots {
 		if _, err := os.Stat(root); err != nil {
 			logger.Printf("model root %s: skipped (%v)", root, err)
 			continue
 		}
 		logger.Printf("model root:   %s", root)
-		sources = append(sources, store.NewDir(root))
+		readable = append(readable, root)
 	}
-	if len(sources) == 0 {
+	if len(readable) == 0 {
 		return nil, fmt.Errorf("no readable model root among %v", roots)
 	}
-	return sources, nil
+	return readable, nil
 }

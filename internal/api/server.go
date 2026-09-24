@@ -24,7 +24,7 @@ import (
 const Version = "0.32.0"
 
 type Server struct {
-	Store  store.Source
+	Store  *store.Store
 	Config config.Config
 	Super  *supervisor.Supervisor
 	Logger *log.Logger

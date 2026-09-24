@@ -9,7 +9,7 @@ import (
 	"github.com/oswald/alpakka/internal/gguf/gguftest"
 )
 
-func layered(t *testing.T) *Multi {
+func layered(t *testing.T) *Store {
 	t.Helper()
 	first, second := t.TempDir(), t.TempDir()
 	kv := map[string]any{"general.architecture": "qwen35", "general.file_type": uint32(15)}
@@ -19,7 +19,7 @@ func layered(t *testing.T) *Multi {
 	gguftest.Write(t, filepath.Join(second, "shared", "q4-k-m.gguf"), kv)
 	gguftest.Write(t, filepath.Join(second, "only-second", "q8-0.gguf"), kv)
 
-	return NewMulti(nil, NewDir(first), NewDir(second))
+	return New(nil, first, second)
 }
 
 func TestMultiFirstRootWins(t *testing.T) {
@@ -29,7 +29,7 @@ func TestMultiFirstRootWins(t *testing.T) {
 	gguftest.Write(t, filepath.Join(second, "shared", "q4-k-m.gguf"), kv)
 
 	var shadowed int
-	m := NewMulti(func(string, ...any) { shadowed++ }, NewDir(first), NewDir(second))
+	m := New(func(string, ...any) { shadowed++ }, first, second)
 
 	models, err := m.List()
 	if err != nil {
@@ -98,7 +98,7 @@ func TestMultiKeepsTheAmbiguousNameError(t *testing.T) {
 	gguftest.Write(t, filepath.Join(first, "qwen", "q8-0.gguf"), kv)
 	gguftest.Write(t, filepath.Join(second, "qwen", "iq3-xxs.gguf"), kv)
 
-	m := NewMulti(nil, NewDir(first), NewDir(second))
+	m := New(nil, first, second)
 	_, err := m.Get("qwen")
 	if err == nil {
 		t.Fatal("expected an error")
@@ -113,7 +113,7 @@ func TestMultiSurvivesAnUnreadableRoot(t *testing.T) {
 	gguftest.Write(t, filepath.Join(good, "fine", "q8-0.gguf"), map[string]any{
 		"general.architecture": "qwen35",
 	})
-	m := NewMulti(nil, NewDir(filepath.Join(t.TempDir(), "gone")), NewDir(good))
+	m := New(nil, filepath.Join(t.TempDir(), "gone"), good)
 
 	models, err := m.List()
 	if err != nil {

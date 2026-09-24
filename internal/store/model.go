@@ -11,14 +11,6 @@ import (
 	"github.com/oswald/alpakka/internal/gguf"
 )
 
-type Config struct {
-	ModelFormat   string
-	ModelFamily   string
-	ModelFamilies []string
-	ModelType     string
-	FileType      string
-}
-
 type Model struct {
 	Name       string
 	Digest     string
@@ -27,7 +19,6 @@ type Model struct {
 
 	ModelPath     string
 	ProjectorPath string
-	Config        Config
 	Template      string
 
 	cache *ggufCache
@@ -40,18 +31,19 @@ func (m *Model) GGUF() (*gguf.File, error) {
 	return m.cache.open(m.ModelPath)
 }
 
-// The two lengths are only in the GGUF header and are omitted if it cannot be read.
 func (m *Model) Details() api.ModelDetails {
-	d := api.ModelDetails{
-		Format:            m.Config.ModelFormat,
-		Family:            m.Config.ModelFamily,
-		Families:          m.Config.ModelFamilies,
-		ParameterSize:     m.Config.ModelType,
-		QuantizationLevel: m.Config.FileType,
-	}
+	d := api.ModelDetails{Format: "gguf", QuantizationLevel: "unknown"}
 	f, err := m.GGUF()
 	if err != nil {
 		return d
+	}
+	if arch := f.Architecture(); arch != "" {
+		d.Family = arch
+		d.Families = []string{arch}
+	}
+	d.ParameterSize = gguf.HumanParams(f.ParameterCount())
+	if ft, ok := f.Uint("general.file_type"); ok {
+		d.QuantizationLevel = gguf.FileTypeName(ft)
 	}
 	if n, ok := f.ArchUint("context_length"); ok {
 		d.ContextLength = int(n)
@@ -100,14 +92,14 @@ func (m *Model) Capabilities() []model.Capability {
 		if _, ok := f.ArchKV("audio.block_count"); ok {
 			add(model.CapabilityAudio)
 		}
+		// Harmony templates reason in channels, which the <think> check cannot see.
+		if f.Architecture() == "gpt-oss" {
+			add(model.CapabilityThinking)
+		}
 	}
 
 	if m.ProjectorPath != "" {
 		add(model.CapabilityVision)
-	}
-
-	if m.Config.ModelFamily == "gpt-oss" {
-		add(model.CapabilityThinking)
 	}
 
 	return caps

@@ -9,7 +9,6 @@ import (
 
 	"github.com/oswald/alpakka/internal/config"
 	"github.com/oswald/alpakka/internal/hub"
-	"github.com/oswald/alpakka/internal/store"
 )
 
 func discardLogger() *log.Logger { return log.New(io.Discard, "", 0) }
@@ -81,23 +80,23 @@ func TestOpenRoots(t *testing.T) {
 
 	t.Run("skips a missing root", func(t *testing.T) {
 		cfg := config.Config{Store: config.Store{Roots: []string{missing, plain}}}
-		sources, err := openRoots(cfg, "", discardLogger())
+		roots, err := openRoots(cfg, "", discardLogger())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(sources) != 1 {
-			t.Fatalf("got %d sources, want 1", len(sources))
+		if len(roots) != 1 || roots[0] != plain {
+			t.Fatalf("got %v, want only %s", roots, plain)
 		}
 	})
 
 	t.Run("override replaces the configured roots", func(t *testing.T) {
 		cfg := config.Config{Store: config.Store{Roots: []string{plain}}}
-		sources, err := openRoots(cfg, other, discardLogger())
+		roots, err := openRoots(cfg, other, discardLogger())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if d, ok := sources[0].(*store.DirStore); !ok || len(sources) != 1 || d.Root() != other {
-			t.Fatalf("got %v, want only the override root", sources)
+		if len(roots) != 1 || roots[0] != other {
+			t.Fatalf("got %v, want only the override root", roots)
 		}
 	})
 

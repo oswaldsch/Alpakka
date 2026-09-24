@@ -29,7 +29,7 @@ func testServer(t *testing.T) http.Handler {
 	})
 	cfg := config.Default()
 	s := &Server{
-		Store:  store.NewDir(root),
+		Store:  store.New(nil, root),
 		Config: cfg,
 		Super:  supervisor.New(cfg.Llama, cfg.WoL, nil),
 	}

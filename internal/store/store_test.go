@@ -15,7 +15,7 @@ import (
 const toolTemplate = `{% for m in messages %}{{ m.content }}{% endfor %}` +
 	`{% if tools %}{{ tools }}{% endif %}<think></think>`
 
-func dirFixture(t *testing.T) *DirStore {
+func dirFixture(t *testing.T) *Store {
 	t.Helper()
 	root := t.TempDir()
 
@@ -47,7 +47,7 @@ func dirFixture(t *testing.T) *DirStore {
 		"general.architecture": "glm4",
 		"general.file_type":    uint32(30),
 	})
-	return NewDir(root)
+	return New(nil, root)
 }
 
 func names(models []Model) []string {
@@ -186,7 +186,7 @@ func TestDirDigestIsStableAndDistinct(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := NewDir(s.Root()).Get("qwen3.8-27b:iq3-xxs")
+	again, err := New(nil, s.roots...).Get("qwen3.8-27b:iq3-xxs")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestDirSplitModelIsOneTag(t *testing.T) {
 	gguftest.Write(t, filepath.Join(root, "big", "q4-k-m-00002-of-00003.gguf"), kv)
 	gguftest.Write(t, filepath.Join(root, "big", "q4-k-m-00003-of-00003.gguf"), kv)
 
-	s := NewDir(root)
+	s := New(nil, root)
 	models, err := s.List()
 	if err != nil {
 		t.Fatal(err)
@@ -241,7 +241,7 @@ func TestDirSkipsUnparseableFiles(t *testing.T) {
 		"general.architecture": "qwen35",
 	})
 
-	models, err := NewDir(root).List()
+	models, err := New(nil, root).List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestDirIgnoresOrphanProjector(t *testing.T) {
 	gguftest.Write(t, filepath.Join(root, "orphan", "q4-k-m.mmproj.gguf"), map[string]any{
 		"general.architecture": "clip",
 	})
-	models, err := NewDir(root).List()
+	models, err := New(nil, root).List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestDirIgnoresOrphanProjector(t *testing.T) {
 }
 
 func TestDirMissingRootListsNothing(t *testing.T) {
-	models, err := NewDir(filepath.Join(t.TempDir(), "absent")).List()
+	models, err := New(nil, filepath.Join(t.TempDir(), "absent")).List()
 	if err != nil {
 		t.Fatal(err)
 	}
