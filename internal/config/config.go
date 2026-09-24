@@ -154,12 +154,11 @@ type Profile struct {
 	KeepAlive *string `toml:"keep_alive"`
 }
 
-// Encodes the author's machine: ollama's llama.cpp on ROCm, with the settings
-// the gfx1200-lab benchmarks favoured.
+// The profile defaults are the settings the gfx1200-lab benchmarks favoured. There is
+// no default llama.cpp build, so the config has to name one.
 func Default() Config {
 	return Config{
 		Server: Server{Listen: "127.0.0.1:11435"},
-		Llama:  Llama{LibDir: "/usr/local/lib/ollama", Backend: "rocm_v7_2"},
 		WoL:    map[string]string{},
 		Defaults: Profile{
 			NumCtx:     ptr(32768),

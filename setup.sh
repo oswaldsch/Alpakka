@@ -3,8 +3,8 @@
 # setup.sh — build, install and start alpakka.
 #
 # Installs the binary into PATH, writes a config pointing at the llama.cpp
-# build and ollama model store found on this machine, installs a systemd unit
-# and starts it. Re-running updates everything in place.
+# build found on this machine and a GGUF model directory, installs a systemd
+# unit and starts it. Re-running updates everything in place.
 #
 #   ./setup.sh                    # user service, ~/.local/bin, ~/.config/alpakka
 #   ./setup.sh --system           # system service, /usr/local/bin, /etc/alpakka
@@ -71,7 +71,7 @@ Options:
   --prefix DIR         directory to install the binary into
   --config PATH        config file to write and point the unit at
   --listen ADDR        listen address, e.g. 127.0.0.1:11435
-  --models DIR         ollama model store (default: autodetected)
+  --models DIR         GGUF model directory (default: ~/models of the service user)
   --lib-dir DIR        directory holding llama-server (default: autodetected)
   --backend NAME       ggml backend subdirectory, e.g. rocm_v7_2, vulkan
   --service-user USER  user the system service runs as (default: invoking user)
@@ -163,16 +163,10 @@ fi
 
 # --------------------------------------------------------------- detect -----
 
-# detect_lib_dir finds the directory holding llama-server. ollama ships one, and
-# a hand-built llama.cpp is just as good; both are checked.
+# detect_lib_dir finds the directory holding llama-server.
 detect_lib_dir() {
 	local c p
-	for c in \
-		/usr/local/lib/ollama /usr/lib/ollama /usr/lib64/ollama \
-		/opt/ollama/lib/ollama /usr/share/ollama/lib/ollama \
-		"$HOME/.local/lib/ollama" \
-		/usr/local/lib/llama.cpp /opt/llama.cpp/bin /usr/local/bin
-	do
+	for c in /usr/local/lib/llama.cpp /opt/llama.cpp/bin /usr/local/bin; do
 		[[ -x $c/llama-server ]] && { printf '%s\n' "$c"; return 0; }
 	done
 	if p="$(command -v llama-server 2>/dev/null)"; then
@@ -221,23 +215,6 @@ detect_backend() {
 	printf '%s\n' "${avail[0]}"
 }
 
-# detect_models finds ollama's model store: a directory with manifests/ and
-# blobs/ under it.
-detect_models() {
-	local c candidates=()
-	[[ -n ${OLLAMA_MODELS:-} ]] && candidates+=("$OLLAMA_MODELS")
-	candidates+=(
-		/var/lib/ollama/.ollama/models
-		/usr/share/ollama/.ollama/models
-		/var/lib/ollama/models
-		"$HOME/.ollama/models"
-	)
-	for c in "${candidates[@]}"; do
-		[[ -d $c/blobs ]] && { printf '%s\n' "$c"; return 0; }
-	done
-	return 1
-}
-
 # AS_USER runs a command as the user the service will run as. Testing access as
 # the invoking user instead is how a system service ends up installed, active,
 # and serving nothing.
@@ -270,12 +247,8 @@ if [[ -z $LIB_DIR ]]; then
 	LIB_DIR="$(detect_lib_dir)" || die \
 "no llama-server found.
 
-Looked in /usr/local/lib/ollama, /usr/lib/ollama, /opt/llama.cpp/bin and on
-PATH. Note that a current ollama is not enough: it runs models through a
-runner built into its own binary and ships only the ggml libraries, so a
-machine with ollama installed still has no llama-server.
-
-alpakka needs one from llama.cpp itself, recent enough for --fit and
+Looked in /usr/local/lib/llama.cpp, /opt/llama.cpp/bin, /usr/local/bin and
+on PATH. alpakka needs one from llama.cpp itself, recent enough for --fit and
 --spec-type. Build it, or install a package that carries it, then re-run this
 script (--lib-dir points at the directory holding the binary)."
 fi
@@ -349,34 +322,19 @@ Update llama.cpp, or pass --skip-llama-check to install against it anyway."
 fi
 
 if [[ -z $MODELS_ROOT ]]; then
-	MODELS_ROOT="$(detect_models)" || die \
-"no ollama model store found.
-
-alpakka reads models that 'ollama pull' has already fetched; it does not pull.
-Looked at \$OLLAMA_MODELS, /var/lib/ollama/.ollama/models,
-/usr/share/ollama/.ollama/models and ~/.ollama/models. Pass one with --models."
+	MODELS_ROOT="$(getent passwd "$SERVICE_USER" | cut -d: -f6)/models"
 fi
-info "model store:   $MODELS_ROOT"
+info "model root:    $MODELS_ROOT"
 
-# ollama writes manifests/ on the first pull. Before that the store is real but
-# empty, and alpakka has nothing to list.
-if [[ ! -d $MODELS_ROOT/manifests ]]; then
-	warn "$MODELS_ROOT has no manifests/ yet — no models have been pulled.
-    alpakka cannot list or serve anything until one is:
-        ollama pull <model>
-    The service is installed either way; no need to re-run this script."
-fi
-
-# Probe manifests/ when it exists, since that is what alpakka actually walks,
-# and the store root before the first pull creates it.
-models_probe="$MODELS_ROOT"
-[[ -d $MODELS_ROOT/manifests ]] && models_probe="$MODELS_ROOT/manifests"
-if ! readable_as "$models_probe"; then
-	warn "$SERVICE_USER cannot read $MODELS_ROOT — the service will start and serve no models.
+# alpakka refuses to start without a readable model root, so create it empty.
+if [[ ! -d $MODELS_ROOT ]]; then
+	run "${SUDO[@]}" install -d -m 0755 -o "$SERVICE_USER" "$MODELS_ROOT"
+	info "created $MODELS_ROOT, add models with: alpakka pull <ref>"
+elif ! readable_as "$MODELS_ROOT"; then
+	warn "$SERVICE_USER cannot read $MODELS_ROOT, so the service will serve no models.
     Grant read access, for example:
         sudo setfacl -R -m u:$SERVICE_USER:rX $MODELS_ROOT
-        sudo setfacl -d -m u:$SERVICE_USER:rX $MODELS_ROOT
-    or add $SERVICE_USER to the group owning it and log back in."
+        sudo setfacl -d -m u:$SERVICE_USER:rX $MODELS_ROOT"
 fi
 
 # The GPU is reached through /dev/kfd and /dev/dri. A service that cannot open
@@ -429,6 +387,9 @@ write_config() {
 [server]
 listen = "$LISTEN"
 
+[store]
+roots = ["$MODELS_ROOT"]
+
 [llama]
 lib_dir = "$LIB_DIR"
 backend = "$BACKEND"
@@ -441,9 +402,9 @@ flash_attn = "on"
 keep_alive = "5m"
 
 # Per-model profiles hold the settings ollama cannot express. Name the section
-# after the model as it appears in 'ollama list'.
+# after the model as it appears in 'alpakka list'.
 #
-# [models."qwen3.8-27b-q3-32k"]
+# [models."qwen3.8-27b:q3-k-xl"]
 # # MTP speculation is the only lever that beats the card's memory bandwidth.
 # spec_type = "draft-mtp"
 # spec_draft_n_max = 2
@@ -495,7 +456,7 @@ Wants=network-online.target
 
 [Service]
 Type=exec
-ExecStart=$BIN_PATH -config $CONFIG_PATH -listen $LISTEN -models $MODELS_ROOT
+ExecStart=$BIN_PATH -config $CONFIG_PATH -listen $LISTEN
 Restart=on-failure
 RestartSec=2
 # alpakka stops its llama-server child itself on SIGTERM; signalling only the
@@ -608,11 +569,11 @@ models="$(curl -fsS "http://$probe_host:$probe_port/api/tags" 2>/dev/null | grep
 
 step "${C_GREEN}alpakka is up${C_OFF} on http://$probe_host:$probe_port"
 info "version:  $version"
-info "models:   $models found in $MODELS_ROOT"
+info "models:   $models found"
 echo
 info "point clients at it:"
 info "    export OLLAMA_HOST=$probe_host:$probe_port"
-info "    ollama list"
+info "    alpakka list"
 echo
 info "logs:     $JOURNAL -u alpakka -f"
 info "restart:  ${SYSTEMCTL[*]} restart alpakka"

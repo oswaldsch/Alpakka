@@ -67,6 +67,9 @@ func serve(args []string) error {
 
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 
+	if cfg.Llama.LibDir == "" {
+		return fmt.Errorf("%s: set lib_dir under [llama] to the directory holding llama-server", *configPath)
+	}
 	if _, err := os.Stat(cfg.Llama.Binary()); err != nil {
 		return fmt.Errorf("llama-server not found at %s: %w", cfg.Llama.Binary(), err)
 	}

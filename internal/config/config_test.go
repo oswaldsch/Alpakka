@@ -157,11 +157,11 @@ func TestProjectorFalseDropsProjector(t *testing.T) {
 }
 
 func TestBackendDirIsBinaryDirPlusBackend(t *testing.T) {
-	l := Llama{LibDir: "/usr/local/lib/ollama", Backend: "rocm_v7_2"}
-	if got := l.BackendDir(); got != "/usr/local/lib/ollama/rocm_v7_2" {
+	l := Llama{LibDir: "/opt/llama.cpp", Backend: "rocm"}
+	if got := l.BackendDir(); got != "/opt/llama.cpp/rocm" {
 		t.Errorf("BackendDir = %q", got)
 	}
-	if got := l.Binary(); got != "/usr/local/lib/ollama/llama-server" {
+	if got := l.Binary(); got != "/opt/llama.cpp/llama-server" {
 		t.Errorf("Binary = %q", got)
 	}
 }
