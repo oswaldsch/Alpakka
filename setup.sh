@@ -253,6 +253,8 @@ on PATH. alpakka needs one from llama.cpp itself, recent enough for --fit and
 script (--lib-dir points at the directory holding the binary)."
 fi
 [[ -x $LIB_DIR/llama-server ]] || die "no executable llama-server in $LIB_DIR"
+# The service runs from another working directory, so a relative path breaks it.
+LIB_DIR="$(realpath "$LIB_DIR")"
 info "llama-server:  $LIB_DIR/llama-server"
 
 if [[ -z $BACKEND ]]; then
@@ -423,6 +425,10 @@ if [[ -e $CONFIG_PATH ]] && (( ! FORCE_CONFIG )); then
 	if [[ -r $CONFIG_PATH ]]; then
 		existing_listen="$(sed -n 's/^[[:space:]]*listen[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$CONFIG_PATH" | head -n1)"
 		[[ -n $existing_listen ]] && LISTEN="$existing_listen"
+		existing_lib_dir="$(sed -n 's/^[[:space:]]*lib_dir[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$CONFIG_PATH" | head -n1)"
+		if [[ -n $existing_lib_dir && $existing_lib_dir != "$LIB_DIR" ]]; then
+			warn "$CONFIG_PATH keeps lib_dir = \"$existing_lib_dir\", not $LIB_DIR; pass --force-config to replace it"
+		fi
 	fi
 	: "${LISTEN:=127.0.0.1:11435}"
 else
