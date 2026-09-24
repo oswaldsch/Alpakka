@@ -217,7 +217,6 @@ func (s *DirStore) model(name, tag string, files tagFiles) (*Model, error) {
 		Name:          name + ":" + tag,
 		ModelPath:     files.parts[0],
 		ProjectorPath: files.projector,
-		Params:        map[string]any{},
 		cache:         s.cache,
 	}
 
@@ -308,6 +307,14 @@ func splitName(name string) (string, string) {
 	}
 	off := len(name) - len(p)
 	return name[:off+i], name[off+i+1:]
+}
+
+// Strips any registry host so a colon in host:port is not mistaken for a tag separator.
+func path(name string) string {
+	if i := strings.Index(name, "/"); i >= 0 {
+		return name[i:]
+	}
+	return name
 }
 
 // The name arrives from an HTTP request, so it must not point anywhere else.

@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -120,7 +119,6 @@ func onTerminal() bool {
 		(strings.HasPrefix(target, "/dev/pts/") || strings.HasPrefix(target, "/dev/tty"))
 }
 
-// Ollama's layout is read-only to alpakka, so it is never a candidate.
 func writableRoot(cfg config.Config, override string) (string, error) {
 	if override != "" {
 		return override, nil
@@ -129,11 +127,8 @@ func writableRoot(cfg config.Config, override string) (string, error) {
 	if len(roots) == 0 {
 		roots = store.DefaultRoots()
 	}
-	for _, root := range roots {
-		if info, err := os.Stat(filepath.Join(root, "manifests")); err == nil && info.IsDir() {
-			continue
-		}
-		return root, nil
+	if len(roots) == 0 {
+		return "", fmt.Errorf("no model root configured")
 	}
-	return "", fmt.Errorf("no directory-backed model root among %v", roots)
+	return roots[0], nil
 }

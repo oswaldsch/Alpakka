@@ -13,18 +13,11 @@ import (
 var ErrNotFound = errors.New("model not found")
 
 func DefaultRoots() []string {
-	var roots []string
-	if home, err := os.UserHomeDir(); err == nil {
-		roots = append(roots, filepath.Join(home, "models"))
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
 	}
-	return append(roots, DefaultRoot())
-}
-
-func Open(root string) Source {
-	if info, err := os.Stat(filepath.Join(root, "manifests")); err == nil && info.IsDir() {
-		return New(root)
-	}
-	return NewDir(root)
+	return []string{filepath.Join(home, "models")}
 }
 
 type Multi struct {

@@ -104,10 +104,6 @@ func TestDirGetResolvesTagAndProjector(t *testing.T) {
 	if m.Template != toolTemplate {
 		t.Errorf("Template = %q, want the GGUF chat template", m.Template)
 	}
-	// config.toml owns these for a directory-backed model.
-	if m.System != "" || len(m.Params) != 0 {
-		t.Errorf("System = %q, Params = %v; both should be empty", m.System, m.Params)
-	}
 }
 
 func TestDirBareNameNeedsAUniqueTag(t *testing.T) {

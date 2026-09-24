@@ -3,7 +3,6 @@ package main
 import (
 	"io"
 	"log"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,15 +11,6 @@ import (
 	"github.com/oswald/alpakka/internal/hub"
 	"github.com/oswald/alpakka/internal/store"
 )
-
-func ollamaLikeRoot(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(root, "manifests"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return root
-}
 
 func discardLogger() *log.Logger { return log.New(io.Discard, "", 0) }
 
@@ -31,15 +21,8 @@ func TestRunRejectsUnknownCommand(t *testing.T) {
 	}
 }
 
-func TestImportNeedsASource(t *testing.T) {
-	err := importModels(nil)
-	if err == nil || !strings.Contains(err.Error(), "--from-ollama") {
-		t.Fatalf("got %v, want a hint to pass --from-ollama", err)
-	}
-}
-
 func TestWritableRoot(t *testing.T) {
-	plain, ollama := t.TempDir(), ollamaLikeRoot(t)
+	first, second := t.TempDir(), t.TempDir()
 
 	tests := []struct {
 		name     string
@@ -48,10 +31,8 @@ func TestWritableRoot(t *testing.T) {
 		want     string
 		wantErr  bool
 	}{
-		{name: "override wins", roots: []string{plain}, override: "/elsewhere", want: "/elsewhere"},
-		{name: "first plain root", roots: []string{plain, ollama}, want: plain},
-		{name: "ollama root is skipped", roots: []string{ollama, plain}, want: plain},
-		{name: "only ollama roots", roots: []string{ollama}, wantErr: true},
+		{name: "override wins", roots: []string{first}, override: "/elsewhere", want: "/elsewhere"},
+		{name: "first root", roots: []string{first, second}, want: first},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -64,23 +45,6 @@ func TestWritableRoot(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestOllamaRootPicksTheOllamaLayout(t *testing.T) {
-	plain, ollama := t.TempDir(), ollamaLikeRoot(t)
-	cfg := config.Config{Store: config.Store{Roots: []string{plain, ollama}}}
-
-	if got := ollamaRoot(cfg); got != ollama {
-		t.Fatalf("got %q, want %q", got, ollama)
-	}
-}
-
-func TestOllamaRootFallsBackToDefault(t *testing.T) {
-	cfg := config.Config{Store: config.Store{Roots: []string{t.TempDir()}}}
-
-	if got := ollamaRoot(cfg); got != store.DefaultRoot() {
-		t.Fatalf("got %q, want %q", got, store.DefaultRoot())
 	}
 }
 
@@ -112,7 +76,7 @@ func TestWantProjector(t *testing.T) {
 }
 
 func TestOpenRoots(t *testing.T) {
-	plain, ollama := t.TempDir(), ollamaLikeRoot(t)
+	plain, other := t.TempDir(), t.TempDir()
 	missing := filepath.Join(t.TempDir(), "absent")
 
 	t.Run("skips a missing root", func(t *testing.T) {
@@ -126,27 +90,13 @@ func TestOpenRoots(t *testing.T) {
 		}
 	})
 
-	t.Run("detects each layout", func(t *testing.T) {
-		cfg := config.Config{Store: config.Store{Roots: []string{plain, ollama}}}
-		sources, err := openRoots(cfg, "", discardLogger())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := sources[0].(*store.DirStore); !ok {
-			t.Errorf("first root is %T, want *store.DirStore", sources[0])
-		}
-		if _, ok := sources[1].(*store.Store); !ok {
-			t.Errorf("second root is %T, want *store.Store", sources[1])
-		}
-	})
-
 	t.Run("override replaces the configured roots", func(t *testing.T) {
 		cfg := config.Config{Store: config.Store{Roots: []string{plain}}}
-		sources, err := openRoots(cfg, ollama, discardLogger())
+		sources, err := openRoots(cfg, other, discardLogger())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := sources[0].(*store.Store); !ok || len(sources) != 1 {
+		if d, ok := sources[0].(*store.DirStore); !ok || len(sources) != 1 || d.Root() != other {
 			t.Fatalf("got %v, want only the override root", sources)
 		}
 	})

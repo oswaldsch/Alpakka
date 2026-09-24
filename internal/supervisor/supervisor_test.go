@@ -14,45 +14,58 @@ import (
 	"github.com/oswald/alpakka/internal/store"
 )
 
-// Env overrides come first so tests can run against a hand-installed build.
+// Runs against the installed alpakka's own llama.cpp build and model roots,
+// or ALPAKKA_LLAMA_LIB_DIR and ALPAKKA_LLAMA_BACKEND when set.
+func localConfig(t *testing.T) config.Config {
+	t.Helper()
+	cfg, err := config.Load(config.DefaultPath())
+	if err != nil {
+		t.Skipf("config: %v", err)
+	}
+	if dir := os.Getenv("ALPAKKA_LLAMA_LIB_DIR"); dir != "" {
+		cfg.Llama = config.Llama{LibDir: dir, Backend: os.Getenv("ALPAKKA_LLAMA_BACKEND")}
+	}
+	return cfg
+}
+
 func testLlama(t *testing.T) config.Llama {
 	t.Helper()
-	candidates := []config.Llama{}
-	if dir := os.Getenv("ALPAKKA_LLAMA_LIB_DIR"); dir != "" {
-		backend := os.Getenv("ALPAKKA_LLAMA_BACKEND")
-		if backend == "" {
-			backend = "."
-		}
-		candidates = append(candidates, config.Llama{LibDir: dir, Backend: backend})
+	l := localConfig(t).Llama
+	if _, err := os.Stat(l.Binary()); err != nil {
+		t.Skip("no llama-server present")
 	}
-	candidates = append(candidates,
-		config.Llama{LibDir: "/usr/local/lib/ollama", Backend: "rocm_v7_2"},
-		config.Llama{LibDir: os.Getenv("HOME") + "/.local/lib/llama.cpp", Backend: "."},
-	)
-	for _, l := range candidates {
-		if _, err := os.Stat(l.Binary()); err != nil {
-			continue
-		}
-		if _, err := os.Stat(l.BackendDir()); err != nil {
-			continue
-		}
-		return l
+	if _, err := os.Stat(l.BackendDir()); err != nil {
+		t.Skip("no llama-server backend directory present")
 	}
-	t.Skip("no llama-server present")
-	return config.Llama{}
+	return l
 }
 
 func smallModel(t *testing.T) *store.Model {
 	t.Helper()
-	root := store.DefaultRoot()
-	if _, err := os.Stat(root); err != nil {
-		t.Skip("ollama model store not present")
+	roots := localConfig(t).Store.Roots
+	if len(roots) == 0 {
+		roots = store.DefaultRoots()
 	}
-	m, err := store.New(root).Get("qwen3:0.6b")
+	var sources []store.Source
+	for _, r := range roots {
+		sources = append(sources, store.NewDir(r))
+	}
+	models, err := store.NewMulti(nil, sources...).List()
 	if err != nil {
-		t.Skipf("qwen3:0.6b not pulled: %v", err)
+		t.Skipf("model roots: %v", err)
 	}
-	return m
+	var smallest *store.Model
+	for i := range models {
+		m := &models[i]
+		if m.IsEmbedding() || (smallest != nil && m.Size >= smallest.Size) {
+			continue
+		}
+		smallest = m
+	}
+	if smallest == nil {
+		t.Skip("no chat model in the model roots")
+	}
+	return smallest
 }
 
 func TestArgsCarriesTheSettingsOllamaCannotExpress(t *testing.T) {

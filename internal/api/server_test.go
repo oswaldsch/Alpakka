@@ -160,19 +160,6 @@ func TestOpenAIModelsListsTheStore(t *testing.T) {
 	}
 }
 
-func TestFormatParametersMatchesOllamaLayout(t *testing.T) {
-	got := formatParameters(map[string]any{
-		"num_ctx": float64(32768),
-		"stop":    []any{"<|im_start|>", "<|im_end|>"},
-	})
-	want := "num_ctx                        32768\n" +
-		"stop                           \"<|im_start|>\"\n" +
-		"stop                           \"<|im_end|>\""
-	if got != want {
-		t.Errorf("parameters =\n%q\nwant\n%q", got, want)
-	}
-}
-
 func TestPreflightIsAnswered(t *testing.T) {
 	h := testServer(t)
 	r := httptest.NewRequest(http.MethodOptions, "/api/chat", nil)

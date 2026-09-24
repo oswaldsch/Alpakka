@@ -31,8 +31,7 @@ type Server struct {
 	Origins []string `toml:"origins"`
 }
 
-// Roots are searched in order, so an earlier root shadows later ones. A root
-// with manifests/ is an ollama store, anything else a GGUF directory.
+// Roots are searched in order, so an earlier root shadows later ones.
 type Store struct {
 	Roots []string `toml:"roots"`
 }

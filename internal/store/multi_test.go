@@ -2,28 +2,12 @@ package store
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/oswald/alpakka/internal/gguf/gguftest"
 )
-
-func TestOpenPicksTheReaderFromTheLayout(t *testing.T) {
-	plain := t.TempDir()
-	if _, ok := Open(plain).(*DirStore); !ok {
-		t.Errorf("a plain directory should read as a DirStore")
-	}
-
-	ollama := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(ollama, "manifests"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := Open(ollama).(*Store); !ok {
-		t.Errorf("a root with manifests/ should read as an ollama Store")
-	}
-}
 
 func layered(t *testing.T) *Multi {
 	t.Helper()
@@ -129,7 +113,7 @@ func TestMultiSurvivesAnUnreadableRoot(t *testing.T) {
 	gguftest.Write(t, filepath.Join(good, "fine", "q8-0.gguf"), map[string]any{
 		"general.architecture": "qwen35",
 	})
-	m := NewMulti(nil, Open(filepath.Join(t.TempDir(), "gone")), NewDir(good))
+	m := NewMulti(nil, NewDir(filepath.Join(t.TempDir(), "gone")), NewDir(good))
 
 	models, err := m.List()
 	if err != nil {

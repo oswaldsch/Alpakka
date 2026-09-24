@@ -11,8 +11,6 @@ type Source interface {
 	Get(name string) (*Model, error)
 }
 
-var _ Source = (*Store)(nil)
-
 // A header parse walks the whole tensor table, and /api/ps is polled while every
 // request resolves a model, so uncached files would be re-read constantly.
 type ggufCache struct {

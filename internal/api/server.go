@@ -203,10 +203,7 @@ func (s *Server) handleShow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := api.ShowResponse{
-		License:      m.License,
 		Template:     m.Template,
-		System:       m.System,
-		Parameters:   formatParameters(m.Params),
 		Details:      m.Details(),
 		Capabilities: m.Capabilities(),
 		ModifiedAt:   m.ModifiedAt,
@@ -345,33 +342,4 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
-}
-
-func formatParameters(params map[string]any) string {
-	if len(params) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	keys := sortedKeys(params)
-	for _, k := range keys {
-		switch v := params[k].(type) {
-		case []any:
-			for _, e := range v {
-				fmt.Fprintf(&b, "%-30s %s\n", k, quoteParam(e))
-			}
-		default:
-			fmt.Fprintf(&b, "%-30s %s\n", k, quoteParam(v))
-		}
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-func quoteParam(v any) string {
-	if s, ok := v.(string); ok {
-		return fmt.Sprintf("%q", s)
-	}
-	if f, ok := v.(float64); ok && f == float64(int64(f)) {
-		return fmt.Sprintf("%d", int64(f))
-	}
-	return fmt.Sprint(v)
 }

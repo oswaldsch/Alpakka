@@ -38,14 +38,12 @@ func run(args []string) error {
 		return serve(rest)
 	case "pull":
 		return pull(rest)
-	case "import":
-		return importModels(rest)
 	case "list", "ls":
 		return list(rest)
 	case "ps":
 		return ps(rest)
 	}
-	return fmt.Errorf("unknown command %q: expected serve, pull, import, list or ps", cmd)
+	return fmt.Errorf("unknown command %q: expected serve, pull, list or ps", cmd)
 }
 
 func serve(args []string) error {
@@ -142,13 +140,8 @@ func openRoots(cfg config.Config, override string, logger *log.Logger) ([]store.
 			logger.Printf("model root %s: skipped (%v)", root, err)
 			continue
 		}
-		src := store.Open(root)
-		kind := "gguf directory"
-		if _, ok := src.(*store.Store); ok {
-			kind = "ollama store"
-		}
-		logger.Printf("model root:   %s (%s)", root, kind)
-		sources = append(sources, src)
+		logger.Printf("model root:   %s", root)
+		sources = append(sources, store.NewDir(root))
 	}
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("no readable model root among %v", roots)
