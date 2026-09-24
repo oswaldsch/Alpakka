@@ -52,6 +52,9 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	// llama-server knows the model by the alias it was started with.
 	body["model"] = toRaw(inst.Runtime().Model)
 	applyProfileToOpenAI(body, profile, r.URL.Path)
+	if strings.HasPrefix(r.URL.Path, "/v1/messages") {
+		relabelLateSystemMessages(body)
+	}
 	delete(body, "keep_alive")
 
 	patched, err := json.Marshal(body)
@@ -137,6 +140,30 @@ func applyProfileToOpenAI(body map[string]json.RawMessage, p config.Profile, pat
 		if _, ok := body["stream_options"]; !ok {
 			body["stream_options"] = toRaw(map[string]any{"include_usage": true})
 		}
+	}
+}
+
+// Claude Code sends a system message after the first user turn, and Qwen templates raise on any system
+// message past the start. Relabelling in place keeps the prompt prefix stable for llama-server's cache.
+func relabelLateSystemMessages(body map[string]json.RawMessage) {
+	var msgs []map[string]json.RawMessage
+	if err := json.Unmarshal(body["messages"], &msgs); err != nil {
+		return
+	}
+	changed, leading := false, true
+	for _, m := range msgs {
+		role := rawString(m["role"])
+		if role != "system" && role != "developer" {
+			leading = false
+			continue
+		}
+		if !leading {
+			m["role"] = toRaw("user")
+			changed = true
+		}
+	}
+	if changed {
+		body["messages"] = toRaw(msgs)
 	}
 }
 

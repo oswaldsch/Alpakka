@@ -216,3 +216,37 @@ func TestApplyProfileToMessagesExplicitEffortWins(t *testing.T) {
 		}
 	}
 }
+
+func TestRelabelLateSystemMessages(t *testing.T) {
+	body := map[string]json.RawMessage{"messages": toRaw([]map[string]any{
+		{"role": "system", "content": "lead"},
+		{"role": "user", "content": "hi"},
+		{"role": "system", "content": "env"},
+		{"role": "developer", "content": "dev"},
+		{"role": "assistant", "content": "ok"},
+	})}
+	relabelLateSystemMessages(body)
+
+	var msgs []struct{ Role, Content string }
+	if err := json.Unmarshal(body["messages"], &msgs); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"system", "user", "user", "user", "assistant"}
+	for i, m := range msgs {
+		if m.Role != want[i] {
+			t.Errorf("message %d (%s): role %q, want %q", i, m.Content, m.Role, want[i])
+		}
+	}
+}
+
+func TestRelabelLateSystemMessagesLeavesCleanBodyUntouched(t *testing.T) {
+	orig := toRaw([]map[string]any{
+		{"role": "user", "content": "hi"},
+		{"role": "assistant", "content": "ok"},
+	})
+	body := map[string]json.RawMessage{"messages": orig}
+	relabelLateSystemMessages(body)
+	if string(body["messages"]) != string(orig) {
+		t.Fatalf("messages were re-encoded: %s", body["messages"])
+	}
+}
