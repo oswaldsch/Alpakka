@@ -197,6 +197,25 @@ func TestPreflightIsAnswered(t *testing.T) {
 	}
 }
 
+func TestPreflightAllowsAnthropicHeaders(t *testing.T) {
+	h := bareServer(t)
+	r := httptest.NewRequest(http.MethodOptions, "/v1/messages", nil)
+	r.Header.Set("Origin", "http://localhost:3000")
+	r.Header.Set("Access-Control-Request-Method", "POST")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	allowed := w.Header().Get("Access-Control-Allow-Headers")
+	for _, hd := range []string{
+		"anthropic-version", "anthropic-beta", "x-api-key",
+		"anthropic-dangerous-direct-browser-access",
+	} {
+		if !strings.Contains(allowed, hd) {
+			t.Errorf("Allow-Headers %q does not include %s", allowed, hd)
+		}
+	}
+}
+
 func TestCORSAllowsLocalAndAppOriginsOnly(t *testing.T) {
 	s := &Server{Config: config.Default()}
 	allowed := []string{
