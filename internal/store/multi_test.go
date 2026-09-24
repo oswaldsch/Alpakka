@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oswald/alpakka/internal/gguf/gguftest"
 )
 
 func TestOpenPicksTheReaderFromTheLayout(t *testing.T) {
@@ -28,10 +30,10 @@ func layered(t *testing.T) *Multi {
 	first, second := t.TempDir(), t.TempDir()
 	kv := map[string]any{"general.architecture": "qwen35", "general.file_type": uint32(15)}
 
-	writeGGUF(t, filepath.Join(first, "shared", "q4-k-m.gguf"), kv)
-	writeGGUF(t, filepath.Join(first, "only-first", "q8-0.gguf"), kv)
-	writeGGUF(t, filepath.Join(second, "shared", "q4-k-m.gguf"), kv)
-	writeGGUF(t, filepath.Join(second, "only-second", "q8-0.gguf"), kv)
+	gguftest.Write(t, filepath.Join(first, "shared", "q4-k-m.gguf"), kv)
+	gguftest.Write(t, filepath.Join(first, "only-first", "q8-0.gguf"), kv)
+	gguftest.Write(t, filepath.Join(second, "shared", "q4-k-m.gguf"), kv)
+	gguftest.Write(t, filepath.Join(second, "only-second", "q8-0.gguf"), kv)
 
 	return NewMulti(nil, NewDir(first), NewDir(second))
 }
@@ -39,8 +41,8 @@ func layered(t *testing.T) *Multi {
 func TestMultiFirstRootWins(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
 	kv := map[string]any{"general.architecture": "qwen35", "general.file_type": uint32(15)}
-	writeGGUF(t, filepath.Join(first, "shared", "q4-k-m.gguf"), kv)
-	writeGGUF(t, filepath.Join(second, "shared", "q4-k-m.gguf"), kv)
+	gguftest.Write(t, filepath.Join(first, "shared", "q4-k-m.gguf"), kv)
+	gguftest.Write(t, filepath.Join(second, "shared", "q4-k-m.gguf"), kv)
 
 	var shadowed int
 	m := NewMulti(func(string, ...any) { shadowed++ }, NewDir(first), NewDir(second))
@@ -108,9 +110,9 @@ func TestMultiGetFallsThroughToLaterRoots(t *testing.T) {
 func TestMultiKeepsTheAmbiguousNameError(t *testing.T) {
 	first, second := t.TempDir(), t.TempDir()
 	kv := map[string]any{"general.architecture": "qwen35", "general.file_type": uint32(15)}
-	writeGGUF(t, filepath.Join(first, "qwen", "q4-k-m.gguf"), kv)
-	writeGGUF(t, filepath.Join(first, "qwen", "q8-0.gguf"), kv)
-	writeGGUF(t, filepath.Join(second, "qwen", "iq3-xxs.gguf"), kv)
+	gguftest.Write(t, filepath.Join(first, "qwen", "q4-k-m.gguf"), kv)
+	gguftest.Write(t, filepath.Join(first, "qwen", "q8-0.gguf"), kv)
+	gguftest.Write(t, filepath.Join(second, "qwen", "iq3-xxs.gguf"), kv)
 
 	m := NewMulti(nil, NewDir(first), NewDir(second))
 	_, err := m.Get("qwen")
@@ -124,7 +126,7 @@ func TestMultiKeepsTheAmbiguousNameError(t *testing.T) {
 
 func TestMultiSurvivesAnUnreadableRoot(t *testing.T) {
 	good := t.TempDir()
-	writeGGUF(t, filepath.Join(good, "fine", "q8-0.gguf"), map[string]any{
+	gguftest.Write(t, filepath.Join(good, "fine", "q8-0.gguf"), map[string]any{
 		"general.architecture": "qwen35",
 	})
 	m := NewMulti(nil, Open(filepath.Join(t.TempDir(), "gone")), NewDir(good))

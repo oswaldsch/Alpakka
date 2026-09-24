@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oswald/alpakka/internal/gguf/gguftest"
+
 	"github.com/ollama/ollama/types/model"
 )
 
@@ -17,31 +19,31 @@ func dirFixture(t *testing.T) *DirStore {
 	t.Helper()
 	root := t.TempDir()
 
-	writeGGUF(t, filepath.Join(root, "qwen3.8-27b", "iq3-xxs.gguf"), map[string]any{
+	gguftest.Write(t, filepath.Join(root, "qwen3.8-27b", "iq3-xxs.gguf"), map[string]any{
 		"general.architecture":    "qwen35",
 		"general.file_type":       uint32(23),
 		"qwen35.context_length":   uint32(262144),
 		"qwen35.embedding_length": uint32(5120),
 		"tokenizer.chat_template": toolTemplate,
 	})
-	writeGGUF(t, filepath.Join(root, "qwen3.8-27b", "iq4-xs.gguf"), map[string]any{
+	gguftest.Write(t, filepath.Join(root, "qwen3.8-27b", "iq4-xs.gguf"), map[string]any{
 		"general.architecture":    "qwen35",
 		"general.file_type":       uint32(30),
 		"qwen35.context_length":   uint32(262144),
 		"tokenizer.chat_template": toolTemplate,
 	})
-	writeGGUF(t, filepath.Join(root, "qwen3.8-27b", "iq4-xs.mmproj.gguf"), map[string]any{
+	gguftest.Write(t, filepath.Join(root, "qwen3.8-27b", "iq4-xs.mmproj.gguf"), map[string]any{
 		"general.architecture": "clip",
 	})
-	writeGGUF(t, filepath.Join(root, "qwen3.8-27b", "imatrix_unsloth.gguf"), map[string]any{
+	gguftest.Write(t, filepath.Join(root, "qwen3.8-27b", "imatrix_unsloth.gguf"), map[string]any{
 		"general.type": "imatrix",
 	})
-	writeGGUF(t, filepath.Join(root, "embedgemma", "q8-0.gguf"), map[string]any{
+	gguftest.Write(t, filepath.Join(root, "embedgemma", "q8-0.gguf"), map[string]any{
 		"general.architecture": "gemma3",
 		"general.file_type":    uint32(7),
 		"pooling_type":         uint32(1),
 	})
-	writeGGUF(t, filepath.Join(root, "unsloth", "glm-4.7-flash", "iq4-xs.gguf"), map[string]any{
+	gguftest.Write(t, filepath.Join(root, "unsloth", "glm-4.7-flash", "iq4-xs.gguf"), map[string]any{
 		"general.architecture": "glm4",
 		"general.file_type":    uint32(30),
 	})
@@ -210,9 +212,9 @@ func TestDirDigestIsStableAndDistinct(t *testing.T) {
 func TestDirSplitModelIsOneTag(t *testing.T) {
 	root := t.TempDir()
 	kv := map[string]any{"general.architecture": "qwen35", "general.file_type": uint32(15)}
-	writeGGUF(t, filepath.Join(root, "big", "q4-k-m-00001-of-00003.gguf"), kv)
-	writeGGUF(t, filepath.Join(root, "big", "q4-k-m-00002-of-00003.gguf"), kv)
-	writeGGUF(t, filepath.Join(root, "big", "q4-k-m-00003-of-00003.gguf"), kv)
+	gguftest.Write(t, filepath.Join(root, "big", "q4-k-m-00001-of-00003.gguf"), kv)
+	gguftest.Write(t, filepath.Join(root, "big", "q4-k-m-00002-of-00003.gguf"), kv)
+	gguftest.Write(t, filepath.Join(root, "big", "q4-k-m-00003-of-00003.gguf"), kv)
 
 	s := NewDir(root)
 	models, err := s.List()
@@ -226,7 +228,7 @@ func TestDirSplitModelIsOneTag(t *testing.T) {
 		t.Errorf("ModelPath = %s, want the first part", models[0].ModelPath)
 	}
 	// llama.cpp loads every part, so /api/tags has to report all of them.
-	if want := 3 * int64(len(ggufBytes(kv))); models[0].Size != want {
+	if want := 3 * int64(len(gguftest.Bytes(kv))); models[0].Size != want {
 		t.Errorf("Size = %d, want %d", models[0].Size, want)
 	}
 }
@@ -239,7 +241,7 @@ func TestDirSkipsUnparseableFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "broken", "half.gguf"), []byte("GGU"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeGGUF(t, filepath.Join(root, "fine", "q8-0.gguf"), map[string]any{
+	gguftest.Write(t, filepath.Join(root, "fine", "q8-0.gguf"), map[string]any{
 		"general.architecture": "qwen35",
 	})
 
@@ -254,7 +256,7 @@ func TestDirSkipsUnparseableFiles(t *testing.T) {
 
 func TestDirIgnoresOrphanProjector(t *testing.T) {
 	root := t.TempDir()
-	writeGGUF(t, filepath.Join(root, "orphan", "q4-k-m.mmproj.gguf"), map[string]any{
+	gguftest.Write(t, filepath.Join(root, "orphan", "q4-k-m.mmproj.gguf"), map[string]any{
 		"general.architecture": "clip",
 	})
 	models, err := NewDir(root).List()

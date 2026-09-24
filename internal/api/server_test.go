@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oswald/alpakka/internal/gguf/gguftest"
 
 	ollama "github.com/ollama/ollama/api"
 
@@ -18,23 +20,16 @@ import (
 // Only endpoints that need no loaded model are exercised, the supervisor has its own tests.
 func testServer(t *testing.T) http.Handler {
 	t.Helper()
-	h := bareServer(t)
-	models, err := store.New(store.DefaultRoot()).List()
-	if err != nil || len(models) == 0 {
-		t.Skip("ollama model store holds no models")
-	}
-	return h
-}
-
-func bareServer(t *testing.T) http.Handler {
-	t.Helper()
-	root := store.DefaultRoot()
-	if _, err := os.Stat(root); err != nil {
-		t.Skip("ollama model store not present")
-	}
+	root := t.TempDir()
+	gguftest.Write(t, filepath.Join(root, "qwen3", "0.6b.gguf"), map[string]any{
+		"general.architecture":    "qwen3",
+		"general.file_type":       uint32(15),
+		"qwen3.context_length":    uint32(40960),
+		"tokenizer.chat_template": "{% for m in messages %}{{ m.content }}{% endfor %}",
+	})
 	cfg := config.Default()
 	s := &Server{
-		Store:  store.New(root),
+		Store:  store.NewDir(root),
 		Config: cfg,
 		Super:  supervisor.New(cfg.Llama, cfg.WoL, nil),
 	}
@@ -179,7 +174,7 @@ func TestFormatParametersMatchesOllamaLayout(t *testing.T) {
 }
 
 func TestPreflightIsAnswered(t *testing.T) {
-	h := bareServer(t)
+	h := testServer(t)
 	r := httptest.NewRequest(http.MethodOptions, "/api/chat", nil)
 	r.Header.Set("Origin", "http://localhost:3000")
 	r.Header.Set("Access-Control-Request-Method", "POST")
@@ -198,7 +193,7 @@ func TestPreflightIsAnswered(t *testing.T) {
 }
 
 func TestPreflightAllowsAnthropicHeaders(t *testing.T) {
-	h := bareServer(t)
+	h := testServer(t)
 	r := httptest.NewRequest(http.MethodOptions, "/v1/messages", nil)
 	r.Header.Set("Origin", "http://localhost:3000")
 	r.Header.Set("Access-Control-Request-Method", "POST")
@@ -243,7 +238,7 @@ func TestCORSAllowsLocalAndAppOriginsOnly(t *testing.T) {
 }
 
 func TestCORSHeadersOnRealResponses(t *testing.T) {
-	h := bareServer(t)
+	h := testServer(t)
 	r := httptest.NewRequest(http.MethodGet, "/api/version", nil)
 	r.Header.Set("Origin", "http://localhost:3000")
 	w := httptest.NewRecorder()

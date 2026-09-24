@@ -1,4 +1,5 @@
-package store
+// Package gguftest writes GGUF headers for tests.
+package gguftest
 
 import (
 	"bytes"
@@ -10,17 +11,17 @@ import (
 )
 
 // Only the header is written, since the reader never touches the weights.
-func writeGGUF(t *testing.T, path string, kv map[string]any) {
+func Write(t testing.TB, path string, kv map[string]any) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, ggufBytes(kv), 0o644); err != nil {
+	if err := os.WriteFile(path, Bytes(kv), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func ggufBytes(kv map[string]any) []byte {
+func Bytes(kv map[string]any) []byte {
 	var b bytes.Buffer
 	b.Write([]byte("GGUF"))
 	put32(&b, 3)

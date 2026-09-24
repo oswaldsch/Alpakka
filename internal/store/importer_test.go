@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/oswald/alpakka/internal/gguf/gguftest"
 )
 
 type fakeSource []Model
@@ -169,7 +171,7 @@ func TestImportRefusesADifferentFile(t *testing.T) {
 func TestImportedModelsReadBack(t *testing.T) {
 	blobs, dest := t.TempDir(), t.TempDir()
 	weights := filepath.Join(blobs, "weights")
-	if err := os.WriteFile(weights, ggufBytes(map[string]any{
+	if err := os.WriteFile(weights, gguftest.Bytes(map[string]any{
 		"general.architecture": "qwen35",
 		"general.file_type":    uint32(12),
 	}), 0o644); err != nil {
