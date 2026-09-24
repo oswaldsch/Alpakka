@@ -456,7 +456,7 @@ Wants=network-online.target
 
 [Service]
 Type=exec
-ExecStart=$BIN_PATH -config $CONFIG_PATH -listen $LISTEN
+ExecStart=$BIN_PATH -config $CONFIG_PATH
 Restart=on-failure
 RestartSec=2
 # alpakka stops its llama-server child itself on SIGTERM; signalling only the
