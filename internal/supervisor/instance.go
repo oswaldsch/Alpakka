@@ -113,7 +113,7 @@ func (i *Instance) Release() {
 	}
 }
 
-func (i *Instance) busy() bool {
+func (i *Instance) Busy() bool {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	return i.inflight > 0

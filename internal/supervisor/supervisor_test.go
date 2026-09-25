@@ -255,7 +255,7 @@ func TestBusyInstanceIsNotEvicted(t *testing.T) {
 	if i.expired(time.Now()) {
 		t.Error("keep-alive did not restart when the request finished")
 	}
-	if i.busy() {
+	if i.Busy() {
 		t.Error("still busy after Release")
 	}
 }
@@ -506,7 +506,7 @@ func TestAcquireIfModelReusesOnlyTheSameModel(t *testing.T) {
 	if got := s.AcquireIfModel(context.Background(), "qwen", false); got != i {
 		t.Fatal("same model with different runtime settings should be reused")
 	}
-	if !i.busy() {
+	if !i.Busy() {
 		t.Error("reuse did not take a reference")
 	}
 	i.Release()
@@ -565,21 +565,21 @@ func TestUnloadStopsOnlyTheNamedModel(t *testing.T) {
 	s := New(config.Llama{}, nil, nil)
 	ctx := context.Background()
 
-	if got, err := s.Unload(ctx, ""); err != nil || got != "" {
+	if got, err := s.Unload(ctx, "", false); err != nil || got != "" {
 		t.Fatalf("Unload with nothing resident = %q, %v; want no error", got, err)
 	}
-	if _, err := s.Unload(ctx, "qwen"); !errors.Is(err, ErrNotLoaded) {
+	if _, err := s.Unload(ctx, "qwen", false); !errors.Is(err, ErrNotLoaded) {
 		t.Fatalf("Unload of an absent model = %v, want ErrNotLoaded", err)
 	}
 
 	s.cur = readyInstance("qwen")
-	if _, err := s.Unload(ctx, "other"); !errors.Is(err, ErrNotLoaded) {
+	if _, err := s.Unload(ctx, "other", false); !errors.Is(err, ErrNotLoaded) {
 		t.Fatalf("Unload of another model = %v, want ErrNotLoaded", err)
 	}
 	if s.Current() == nil {
 		t.Fatal("unloading another model tore down the resident one")
 	}
-	if got, err := s.Unload(ctx, "qwen"); err != nil || got != "qwen" {
+	if got, err := s.Unload(ctx, "qwen", false); err != nil || got != "qwen" {
 		t.Fatalf("Unload = %q, %v", got, err)
 	}
 	if s.Current() != nil {
@@ -596,7 +596,7 @@ func TestUnloadWaitsForAStreamingResponse(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if _, err := s.Unload(context.Background(), ""); err != nil {
+		if _, err := s.Unload(context.Background(), "", false); err != nil {
 			t.Errorf("Unload: %v", err)
 		}
 	}()
@@ -614,5 +614,22 @@ func TestUnloadWaitsForAStreamingResponse(t *testing.T) {
 	}
 	if s.Current() != nil {
 		t.Error("still resident after Unload")
+	}
+}
+
+func TestForcedUnloadDoesNotWaitForTheResponse(t *testing.T) {
+	s := New(config.Llama{}, nil, nil)
+	i := readyInstance("qwen")
+	s.cur = i
+	i.acquireIfLive()
+	defer i.Release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if got, err := s.Unload(ctx, "qwen", true); err != nil || got != "qwen" {
+		t.Fatalf("forced Unload = %q, %v", got, err)
+	}
+	if s.Current() != nil {
+		t.Error("still resident after a forced Unload")
 	}
 }

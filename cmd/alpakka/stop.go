@@ -8,15 +8,27 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
 
+const stopUsage = `alpakka stop [--force] [model]
+
+Unloads the loaded model now rather than at its keep_alive. With no model,
+unloads whatever is loaded; naming a model that is not loaded is an error.
+
+A response still generating is let finish first, so stop can take as long as
+that answer does. --force unloads at once and cuts the response off: its
+client sees the stream end early.
+`
+
 func stop(args []string) error {
 	fs := flag.NewFlagSet("stop", flag.ExitOnError)
 	host := hostFlags(fs)
+	force := fs.Bool("force", false, "unload at once, cutting off a response in progress")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "alpakka stop [model]\n\nWith no model, unloads whatever is loaded.")
+		fmt.Fprint(fs.Output(), stopUsage)
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -30,6 +42,16 @@ func stop(args []string) error {
 	if err != nil {
 		return err
 	}
+	model := fs.Arg(0)
+
+	// Only a notice, so a failure to ask leaves it out rather than stopping the unload.
+	var loaded psResponse
+	if !*force && getJSON(addr, "/api/ps", &loaded) == nil {
+		if name, busy := generating(loaded, model); busy {
+			fmt.Fprintf(os.Stderr, "%s is generating: waiting for that response to finish before unloading.\n"+
+				"Pass --force to cut it off, or Ctrl-C to leave it loaded.\n", name)
+		}
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -37,7 +59,8 @@ func stop(args []string) error {
 	var resp struct {
 		Model string `json:"model"`
 	}
-	if err := postJSON(ctx, addr, "/alpakka/unload", map[string]string{"model": fs.Arg(0)}, &resp); err != nil {
+	req := map[string]any{"model": model, "force": *force}
+	if err := postJSON(ctx, addr, "/alpakka/unload", req, &resp); err != nil {
 		return err
 	}
 	if resp.Model == "" {
@@ -46,6 +69,17 @@ func stop(args []string) error {
 	}
 	fmt.Println("unloaded", resp.Model)
 	return nil
+}
+
+// The server matches a bare or partial name against the store, so this only needs to catch the
+// exact spelling and the empty one. Any other name just goes without the notice.
+func generating(resp psResponse, model string) (string, bool) {
+	for _, m := range resp.Models {
+		if m.Alpakka.Busy && (model == "" || model == m.Name || strings.HasPrefix(m.Name, model+":")) {
+			return m.Name, true
+		}
+	}
+	return "", false
 }
 
 type logsResponse struct {

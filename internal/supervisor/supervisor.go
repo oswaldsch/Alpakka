@@ -66,7 +66,7 @@ func (s *Supervisor) Ensure(ctx context.Context, rt config.Runtime) (*Instance, 
 			s.mu.Unlock()
 			// Reload rather than serve with the previous process's settings, but not while
 			// it is streaming, since killing it truncates the answer with no error.
-			if cur.busy() {
+			if cur.Busy() {
 				s.logf("%s is busy; waiting for it to finish before reloading", cur.rt.Model)
 			}
 			if err := cur.waitIdle(ctx); err != nil {
@@ -148,8 +148,9 @@ func (s *Supervisor) Last() *Instance {
 
 // Unload stops the resident process ahead of its keep-alive and returns the model it
 // served. An empty model means whatever is resident, and nothing resident is not an
-// error then. Like a reload, it waits for responses still streaming rather than cut them off.
-func (s *Supervisor) Unload(ctx context.Context, model string) (string, error) {
+// error then. Like a reload, it waits for responses still streaming rather than cut them
+// off, unless force is set.
+func (s *Supervisor) Unload(ctx context.Context, model string, force bool) (string, error) {
 	for {
 		cur := s.Current()
 		if cur == nil || (model != "" && cur.rt.Model != model) {
@@ -158,15 +159,21 @@ func (s *Supervisor) Unload(ctx context.Context, model string) (string, error) {
 			}
 			return "", fmt.Errorf("%s: %w", model, ErrNotLoaded)
 		}
-		// A load still in progress has a caller waiting on it, which gets its answer first.
-		_ = cur.wait(ctx)
-		if err := cur.waitIdle(ctx); err != nil {
-			return "", err
+		if !force {
+			// A load still in progress has a caller waiting on it, which gets its answer first.
+			_ = cur.wait(ctx)
+			if err := cur.waitIdle(ctx); err != nil {
+				return "", err
+			}
 		}
 
 		s.mu.Lock()
-		if s.cur == cur && !cur.busy() {
-			s.logf("unloading %s: requested", cur.rt.Model)
+		if s.cur == cur && (force || !cur.Busy()) {
+			how := "requested"
+			if cur.Busy() {
+				how = "forced, cutting off a response in progress"
+			}
+			s.logf("unloading %s: %s", cur.rt.Model, how)
 			cur.stop()
 			s.cur = nil
 			s.mu.Unlock()

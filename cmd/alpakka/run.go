@@ -204,6 +204,11 @@ func (c *chatSession) turn(ctx context.Context, prompt string) error {
 		return err
 	}
 	fmt.Fprintln(c.out)
+	if !final.Done {
+		// The server ends the stream without a final chunk when llama-server went away mid-answer,
+		// as after stop --force, so what was printed is not the whole answer.
+		return fmt.Errorf("the response was cut off before it finished")
+	}
 	if c.verbose {
 		fmt.Fprintln(c.meta, stats(final.Metrics))
 	}

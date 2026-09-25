@@ -46,3 +46,10 @@ func TestLogsRejectsABadLineCount(t *testing.T) {
 		}
 	}
 }
+
+func TestUnloadAcceptsForce(t *testing.T) {
+	w := do(t, testServer(t), http.MethodPost, "/alpakka/unload", `{"force":true}`)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, body %s", w.Code, w.Body.String())
+	}
+}

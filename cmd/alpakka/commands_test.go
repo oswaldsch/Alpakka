@@ -142,24 +142,51 @@ func TestChatTurnFailureLeavesHistoryAlone(t *testing.T) {
 }
 
 func TestStopPostsTheModelAndReportsTheServerError(t *testing.T) {
-	var asked string
+	var asked struct {
+		Model string
+		Force bool
+	}
 	host := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
-		var req struct{ Model string }
-		json.NewDecoder(r.Body).Decode(&req)
-		asked = req.Model
-		if r.URL.Path != "/alpakka/unload" || req.Model == "other" {
+		if r.URL.Path == "/api/ps" {
+			w.Write([]byte(`{"models":[]}`))
+			return
+		}
+		json.NewDecoder(r.Body).Decode(&asked)
+		if r.URL.Path != "/alpakka/unload" || asked.Model == "other" {
 			w.WriteHeader(http.StatusNotFound)
 			w.Write([]byte(`{"error":"model 'other' is not loaded"}`))
 			return
 		}
 		w.Write([]byte(`{"model":"m:1"}`))
 	})
-	if err := run([]string{"stop", "-host", host, "m"}); err != nil || asked != "m" {
-		t.Fatalf("stop m: err %v, asked for %q", err, asked)
+	if err := run([]string{"stop", "-host", host, "m"}); err != nil || asked.Model != "m" || asked.Force {
+		t.Fatalf("stop m: err %v, asked for %+v", err, asked)
+	}
+	if err := run([]string{"stop", "-host", host, "--force"}); err != nil || !asked.Force {
+		t.Fatalf("stop --force: err %v, asked for %+v", err, asked)
 	}
 	err := run([]string{"stop", "-host", host, "other"})
 	if err == nil || err.Error() != "model 'other' is not loaded" {
 		t.Errorf("err = %v, want the server's message alone", err)
+	}
+}
+
+func TestStopNoticesAResponseInProgress(t *testing.T) {
+	var resp psResponse
+	resp.Models = make([]psEntry, 1)
+	resp.Models[0].Name = "qwen3.8-27b:q3-k-xl"
+
+	if _, busy := generating(resp, ""); busy {
+		t.Error("an idle model was reported generating")
+	}
+	resp.Models[0].Alpakka.Busy = true
+	for _, name := range []string{"", "qwen3.8-27b", "qwen3.8-27b:q3-k-xl"} {
+		if got, busy := generating(resp, name); !busy || got != "qwen3.8-27b:q3-k-xl" {
+			t.Errorf("generating(%q) = %q, %t", name, got, busy)
+		}
+	}
+	if _, busy := generating(resp, "other"); busy {
+		t.Error("a different model's response was waited on")
 	}
 }
 
@@ -305,5 +332,23 @@ func TestJoinPromptPutsPipedTextAfterTheInstruction(t *testing.T) {
 		if got := joinPrompt(c.arg, c.stdin); got != c.want {
 			t.Errorf("joinPrompt(%q, %q) = %q, want %q", c.arg, c.stdin, got, c.want)
 		}
+	}
+}
+
+func TestChatTurnReportsACutOffAnswer(t *testing.T) {
+	host := fakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(api.ChatResponse{Message: api.Message{Content: "you "}})
+	})
+	c := &chatSession{
+		client: api.NewClient(&url.URL{Scheme: "http", Host: host}, http.DefaultClient),
+		model:  "m",
+		out:    &bytes.Buffer{},
+		meta:   &bytes.Buffer{},
+	}
+	if err := c.turn(t.Context(), "hi"); err == nil || !strings.Contains(err.Error(), "cut off") {
+		t.Fatalf("err = %v, want the answer reported as cut off", err)
+	}
+	if len(c.history) != 0 {
+		t.Errorf("a cut-off answer went into the history: %v", c.history)
 	}
 }

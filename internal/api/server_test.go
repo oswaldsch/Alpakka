@@ -238,3 +238,29 @@ func TestCORSHeadersOnRealResponses(t *testing.T) {
 		t.Errorf("Vary = %q, want it to include Origin", w.Header().Get("Vary"))
 	}
 }
+
+// Ollama's fields stay where its clients read them, with alpakka's beside them under one key.
+func TestPSEntryKeepsOllamaFieldsFlat(t *testing.T) {
+	b, err := json.Marshal(psModel{
+		ProcessModelResponse: ollama.ProcessModelResponse{Name: "m:1", SizeVRAM: 42, ContextLength: 8192},
+		Alpakka:              psDetail{Fit: benchFit{OffloadedLayers: 29, TotalLayers: 29}, Busy: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got ollama.ProcessModelResponse
+	if err := json.Unmarshal(b, &got); err != nil || got.Name != "m:1" || got.SizeVRAM != 42 || got.ContextLength != 8192 {
+		t.Fatalf("an ollama client reads %+v from %s", got, b)
+	}
+	var raw map[string]map[string]any
+	json.Unmarshal(b, &raw)
+	if raw["alpakka"]["busy"] != true || raw["alpakka"]["fit"] == nil {
+		t.Errorf("alpakka detail missing from %s", b)
+	}
+}
+
+func TestStatusIsFoldedIntoPS(t *testing.T) {
+	if w := do(t, testServer(t), http.MethodGet, "/alpakka/status", ""); w.Code != http.StatusNotFound {
+		t.Errorf("/alpakka/status: status = %d, want 404", w.Code)
+	}
+}

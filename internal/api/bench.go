@@ -235,22 +235,6 @@ func fillerPrompt(words int, seed int64) string {
 	return b.String()
 }
 
-func (s *Server) handleBenchStatus(w http.ResponseWriter, r *http.Request) {
-	inst := s.Super.Current()
-	if inst == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"loaded": false})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"loaded":     true,
-		"runtime":    inst.Runtime(),
-		"fit":        fitOf(inst.Fit()),
-		"started_at": inst.StartedAt(),
-		"expires_at": inst.ExpiresAt(),
-		"uptime_ms":  msOf(time.Since(inst.StartedAt())),
-	})
-}
-
 func fitOf(f supervisor.Fit) benchFit {
 	return benchFit{
 		OffloadedLayers: f.OffloadedLayers,

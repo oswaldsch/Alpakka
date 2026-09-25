@@ -8,8 +8,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -34,16 +37,46 @@ func list(args []string) error {
 }
 
 func ps(args []string) error {
-	host, err := serverHost("ps", args)
+	fs := flag.NewFlagSet("ps", flag.ExitOnError)
+	host := hostFlags(fs)
+	verbose := fs.Bool("v", false, "also print the runtime, KV cache, CPU spill and uptime")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("ps takes no arguments")
+	}
+	addr, err := host()
 	if err != nil {
 		return err
 	}
-	var resp api.ProcessResponse
-	if err := getJSON(host, "/api/ps", &resp); err != nil {
+	var resp psResponse
+	if err := getJSON(addr, "/api/ps", &resp); err != nil {
 		return err
 	}
-	printPS(os.Stdout, resp, time.Now())
+	printPS(os.Stdout, resp, *verbose, time.Now())
 	return nil
+}
+
+// /api/ps as alpakka answers it: ollama's entry, and what alpakka knows about the process beside it.
+type psResponse struct {
+	Models []psEntry `json:"models"`
+}
+
+type psEntry struct {
+	api.ProcessModelResponse
+	Alpakka struct {
+		Runtime config.Runtime `json:"runtime"`
+		Fit     struct {
+			OffloadedLayers int     `json:"offloaded_layers"`
+			TotalLayers     int     `json:"total_layers"`
+			CPUBufferMiB    float64 `json:"cpu_buffer_mib"`
+			KVBufferMiB     float64 `json:"kv_buffer_mib"`
+			VRAMMiB         float64 `json:"vram_mib"`
+		} `json:"fit"`
+		StartedAt time.Time `json:"started_at"`
+		Busy      bool      `json:"busy"`
+	} `json:"alpakka"`
 }
 
 func serverHost(name string, args []string) (string, error) {
@@ -133,14 +166,66 @@ func printList(w io.Writer, resp api.ListResponse, now time.Time) {
 	tw.Flush()
 }
 
-func printPS(w io.Writer, resp api.ProcessResponse, now time.Time) {
+func printPS(w io.Writer, resp psResponse, verbose bool, now time.Time) {
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tQUANT\tVRAM\tCONTEXT\tUNTIL")
+	fmt.Fprintln(tw, "NAME\tQUANT\tVRAM\tCONTEXT\tGPU LAYERS\tSTATE\tUNTIL")
 	for _, m := range resp.Models {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\n", m.Name, m.Details.QuantizationLevel,
-			humanBytes(m.SizeVRAM), m.ContextLength, until(m.ExpiresAt, now))
+		a := m.Alpakka
+		layers := "-"
+		if a.Fit.TotalLayers > 0 {
+			layers = fmt.Sprintf("%d/%d", a.Fit.OffloadedLayers, a.Fit.TotalLayers)
+		}
+		state := "idle"
+		if a.Busy {
+			state = "generating"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\t%s\n", m.Name, m.Details.QuantizationLevel,
+			humanBytes(m.SizeVRAM), m.ContextLength, layers, state, until(m.ExpiresAt, now))
 	}
 	tw.Flush()
+	if !verbose {
+		return
+	}
+
+	for _, m := range resp.Models {
+		a := m.Alpakka
+		fmt.Fprintf(w, "\n%s\n", m.Name)
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		if !a.StartedAt.IsZero() {
+			fmt.Fprintf(tw, "  started\t%s, up %s\n", a.StartedAt.Local().Format(time.DateTime),
+				now.Sub(a.StartedAt).Round(time.Second))
+		}
+		fmt.Fprintf(tw, "  KV cache\t%.0f MiB\n", a.Fit.KVBufferMiB)
+		if a.Fit.VRAMMiB > 0 {
+			fmt.Fprintf(tw, "  process VRAM\t%.0f MiB\n", a.Fit.VRAMMiB)
+		}
+		if a.Fit.CPUBufferMiB > 0 {
+			fmt.Fprintf(tw, "  weights on CPU\t%.0f MiB\n", a.Fit.CPUBufferMiB)
+		}
+		fmt.Fprintf(tw, "  runtime\t%s\n", runtimeSettings(a.Runtime))
+		tw.Flush()
+	}
+}
+
+// Only what was set, since most of the runtime is left at llama.cpp's defaults.
+func runtimeSettings(rt config.Runtime) string {
+	b, _ := json.Marshal(rt)
+	var fields map[string]any
+	_ = json.Unmarshal(b, &fields)
+	delete(fields, "model")
+	delete(fields, "model_path")
+	if rt.MainGPU < 0 {
+		delete(fields, "main_gpu")
+	}
+	var out []string
+	for _, k := range slices.Sorted(maps.Keys(fields)) {
+		switch v := fields[k]; v {
+		case "", false, float64(0):
+		default:
+			out = append(out, fmt.Sprintf("%s=%v", k, v))
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func humanBytes(n int64) string {

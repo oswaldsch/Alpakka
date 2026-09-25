@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -52,17 +51,6 @@ func TestBenchIsNotOnTheOllamaOrOpenAISurface(t *testing.T) {
 		if w := do(t, h, http.MethodPost, p, `{"model":"qwen3:0.6b"}`); w.Code != http.StatusNotFound {
 			t.Errorf("%s: status = %d, want 404", p, w.Code)
 		}
-	}
-}
-
-func TestBenchStatusReportsNothingLoaded(t *testing.T) {
-	w := do(t, testServer(t), http.MethodGet, "/alpakka/status", "")
-	var got map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if got["loaded"] != false {
-		t.Errorf("status = %s", w.Body.String())
 	}
 }
 

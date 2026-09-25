@@ -12,6 +12,8 @@ import (
 
 type unloadRequest struct {
 	Model string `json:"model"`
+	// Stops the process even while it streams, which cuts that response off.
+	Force bool `json:"force"`
 }
 
 type unloadResponse struct {
@@ -38,7 +40,7 @@ func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
 	s.loadMu.Lock()
 	defer s.loadMu.Unlock()
 
-	unloaded, err := s.Super.Unload(r.Context(), name)
+	unloaded, err := s.Super.Unload(r.Context(), name, req.Force)
 	switch {
 	case errors.Is(err, supervisor.ErrNotLoaded):
 		writeError(w, http.StatusNotFound, "model '"+req.Model+"' is not loaded")

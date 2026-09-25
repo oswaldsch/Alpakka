@@ -58,7 +58,6 @@ func (s *Server) Handler() http.Handler {
 
 	// alpakka's own surface, outside both wire protocols so no ollama or OpenAI client reaches it by accident.
 	mux.HandleFunc("POST /alpakka/bench", s.handleBench)
-	mux.HandleFunc("GET /alpakka/status", s.handleBenchStatus)
 	mux.HandleFunc("POST /alpakka/unload", s.handleUnload)
 	mux.HandleFunc("GET /alpakka/logs", s.handleLogs)
 
@@ -218,8 +217,29 @@ func (s *Server) handleShow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// Ollama's entry, plus what alpakka knows about the process under a key of its own, so
+// nothing ollama adds later can collide with it. Ollama clients ignore the extra key.
+type psModel struct {
+	api.ProcessModelResponse
+	Alpakka psDetail `json:"alpakka"`
+}
+
+type psDetail struct {
+	// What llama-server is actually running, and where it landed.
+	Runtime   config.Runtime `json:"runtime"`
+	Fit       benchFit       `json:"fit"`
+	StartedAt time.Time      `json:"started_at"`
+	UptimeMS  float64        `json:"uptime_ms"`
+	// A response is streaming, so a reload or an unload would wait for it.
+	Busy bool `json:"busy"`
+}
+
+type psResponse struct {
+	Models []psModel `json:"models"`
+}
+
 func (s *Server) handlePS(w http.ResponseWriter, r *http.Request) {
-	resp := api.ProcessResponse{Models: []api.ProcessModelResponse{}}
+	resp := psResponse{Models: []psModel{}}
 
 	if inst := s.Super.Current(); inst != nil {
 		rt := inst.Runtime()
@@ -237,7 +257,16 @@ func (s *Server) handlePS(w http.ResponseWriter, r *http.Request) {
 			// the KV cache llama.cpp reported. Weights alone understate VRAM by GBs at 32k and q8_0.
 			entry.SizeVRAM = m.Size + int64(inst.Fit().KVBufferMiB*1024*1024)
 		}
-		resp.Models = append(resp.Models, entry)
+		resp.Models = append(resp.Models, psModel{
+			ProcessModelResponse: entry,
+			Alpakka: psDetail{
+				Runtime:   rt,
+				Fit:       fitOf(inst.Fit()),
+				StartedAt: inst.StartedAt(),
+				UptimeMS:  msOf(time.Since(inst.StartedAt())),
+				Busy:      inst.Busy(),
+			},
+		})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

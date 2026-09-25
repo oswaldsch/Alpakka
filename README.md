@@ -123,7 +123,12 @@ without `-f`. `HF_TOKEN` is used for gated repos.
 `alpakka list` (or `ls`) and `alpakka ps` print what the running server can
 serve and what it has loaded. They ask the server rather than the store, since
 `-models` may point it at other roots than the config. `-host` picks another
-server.
+server. `ps` also shows the layer offload and whether a response is generating,
+and `ps -v` adds the KV cache, any weights on the CPU, uptime, and the runtime
+settings llama-server was started with.
+
+`/api/ps` carries that under an `alpakka` key beside ollama's own fields, which
+ollama clients ignore: `runtime`, `fit`, `started_at`, `uptime_ms` and `busy`.
 
 `alpakka rm` is the other half of `pull`, and works on the store directly:
 
@@ -149,6 +154,7 @@ alpakka run qwen3.8-27b "why is the sky blue"
 alpakka run -o reasoning_effort=low -verbose qwen3.8-27b    # interactive chat
 git diff | alpakka run qwen3.8-27b "review this"            # the diff follows the prompt
 alpakka stop                               # unload now rather than at keep_alive
+alpakka stop --force                       # without waiting for a response in progress
 alpakka logs -n 200                        # llama-server's stderr for the last load
 alpakka version                            # alpakka, llama-server, and which flags it has
 ```
@@ -163,8 +169,12 @@ answered, after the prompt argument when there is one; with neither, it starts a
 
 `stop` unloads through `POST /alpakka/unload`, not ollama's `keep_alive: 0`
 generate request, which alpakka would answer by loading the model first. Like a
-reload, it waits for a response still streaming to finish; `stop <model>`
-refuses when a different model is loaded.
+reload, it waits for a response still generating to finish, and says so when
+there is one: `stop` can take as long as that answer does. `--force` unloads at
+once and cuts the response off. Its ollama client gets a stream with no final
+`done` chunk, and `alpakka run` exits reporting the answer cut off, rather than
+either passing a truncated answer as complete. `stop <model>` refuses when a
+different model is loaded.
 
 `logs` reads `GET /alpakka/logs?n=`, the last 400 lines of llama-server's
 stderr at most. It is kept after the process exits, so it still explains a load
@@ -376,8 +386,8 @@ ms and tokens/sec, taken from llama.cpp's counters rather than a wall-clock
 delta around the stream. `runs` above one adds an `aggregate` pooling them,
 which is worth having: the first run on a fresh process is always the slow one.
 `runtime` and `fit` report what actually ran and what landed where, so a result
-is self-describing. `GET /alpakka/status` reports those two for whatever is
-loaded, without touching it.
+is self-describing. `/api/ps` reports those two for whatever is loaded, under
+its `alpakka` key, without touching it.
 
 ## Fitting is enforced
 
@@ -418,7 +428,7 @@ honouring the request's `keep_alive`.
 Implemented: `/api/tags`, `/api/show`, `/api/ps`, `/api/version`, `/api/chat`,
 `/api/generate`, `/api/embed`, `/api/embeddings`, and the `/v1` OpenAI surface
 (`chat/completions`, `completions`, `embeddings`, `models`). Plus alpakka's own
-`/alpakka/bench`, `/alpakka/status`, `/alpakka/unload` and `/alpakka/logs`,
+`/alpakka/bench`, `/alpakka/unload` and `/alpakka/logs`,
 on neither wire protocol.
 
 `/v1/messages` and `/v1/messages/count_tokens` proxy llama-server's own
