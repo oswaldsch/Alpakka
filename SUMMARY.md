@@ -193,7 +193,9 @@ These calls inspect state and do not load a model:
 ```bash
 curl -s http://127.0.0.1:11435/api/tags | jq
 curl -s http://127.0.0.1:11435/api/ps | jq
-curl -s http://127.0.0.1:11435/alpakka/status | jq
+alpakka ps -v           # offload, KV cache, CPU spill, runtime; /api/ps .alpakka
+alpakka logs -n 200     # llama-server stderr, kept after a failed load or eviction
+alpakka version         # llama-server build and which optional flags it has
 curl -s http://127.0.0.1:11435/api/show \
   -H 'Content-Type: application/json' \
   -d '{"model":"MODEL:TAG"}' | jq
@@ -217,7 +219,7 @@ Interpret common symptoms:
 - Embedding request causes reload: expected process-mode switch.
 
 Do not diagnose a client-side “crash” from wall time alone. Check its output
-limit and final reason, Alpakka's journal, `/alpakka/status`, and whether the
+limit and final reason, Alpakka's journal, `alpakka ps -v`, and whether the
 llama-server PID actually exited.
 
 ## Safe operating rules

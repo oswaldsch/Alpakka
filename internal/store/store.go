@@ -49,6 +49,7 @@ func New(logf func(string, ...any), roots ...string) *Store {
 type tagFiles struct {
 	parts     []string
 	projector string
+	shared    bool
 }
 
 func (s *Store) List() ([]Model, error) {
@@ -259,7 +260,7 @@ func (s *Store) scanDir(dir string) (map[string]tagFiles, error) {
 			continue
 		}
 		if f.projector == "" && loose != "" {
-			f.projector = loose
+			f.projector, f.shared = loose, true
 			out[tag] = f
 		}
 	}
@@ -268,10 +269,12 @@ func (s *Store) scanDir(dir string) (map[string]tagFiles, error) {
 
 func (s *Store) model(name, tag string, files tagFiles) (*Model, error) {
 	m := &Model{
-		Name:          name + ":" + tag,
-		ModelPath:     files.parts[0],
-		ProjectorPath: files.projector,
-		cache:         s.cache,
+		Name:            name + ":" + tag,
+		ModelPath:       files.parts[0],
+		ProjectorPath:   files.projector,
+		Parts:           files.parts,
+		ProjectorShared: files.shared,
+		cache:           s.cache,
 	}
 
 	paths := files.parts

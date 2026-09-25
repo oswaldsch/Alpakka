@@ -21,6 +21,11 @@ type Model struct {
 	ProjectorPath string
 	Template      string
 
+	// Every file of the weights, one unless llama.cpp split them. ModelPath is the first.
+	Parts []string
+	// A projector named for the repo rather than the tag serves every tag beside it.
+	ProjectorShared bool
+
 	cache *ggufCache
 }
 
