@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -545,5 +546,73 @@ func TestArgsCarriesBatchDraftCacheAndLoadModeOnlyWhenSet(t *testing.T) {
 		if d := describeChange(bare, rt); !strings.Contains(d, want) {
 			t.Errorf("reload reason does not mention %s: %s", want, d)
 		}
+	}
+}
+
+func readyInstance(model string) *Instance {
+	i := &Instance{
+		rt:      config.Runtime{Model: model},
+		ready:   make(chan struct{}),
+		log:     newRing(4),
+		notable: newRing(4),
+	}
+	i.idle = sync.NewCond(&i.mu)
+	close(i.ready)
+	return i
+}
+
+func TestUnloadStopsOnlyTheNamedModel(t *testing.T) {
+	s := New(config.Llama{}, nil, nil)
+	ctx := context.Background()
+
+	if got, err := s.Unload(ctx, ""); err != nil || got != "" {
+		t.Fatalf("Unload with nothing resident = %q, %v; want no error", got, err)
+	}
+	if _, err := s.Unload(ctx, "qwen"); !errors.Is(err, ErrNotLoaded) {
+		t.Fatalf("Unload of an absent model = %v, want ErrNotLoaded", err)
+	}
+
+	s.cur = readyInstance("qwen")
+	if _, err := s.Unload(ctx, "other"); !errors.Is(err, ErrNotLoaded) {
+		t.Fatalf("Unload of another model = %v, want ErrNotLoaded", err)
+	}
+	if s.Current() == nil {
+		t.Fatal("unloading another model tore down the resident one")
+	}
+	if got, err := s.Unload(ctx, "qwen"); err != nil || got != "qwen" {
+		t.Fatalf("Unload = %q, %v", got, err)
+	}
+	if s.Current() != nil {
+		t.Error("still resident after Unload")
+	}
+}
+
+func TestUnloadWaitsForAStreamingResponse(t *testing.T) {
+	s := New(config.Llama{}, nil, nil)
+	i := readyInstance("qwen")
+	s.cur = i
+	i.acquireIfLive()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := s.Unload(context.Background(), ""); err != nil {
+			t.Errorf("Unload: %v", err)
+		}
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("Unload returned while a response was still streaming")
+	case <-time.After(20 * time.Millisecond):
+	}
+	i.Release()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Unload did not finish once the response did")
+	}
+	if s.Current() != nil {
+		t.Error("still resident after Unload")
 	}
 }

@@ -62,6 +62,8 @@ func (i *Instance) BaseURL() string { return i.baseURL }
 
 func (i *Instance) StartedAt() time.Time { return i.started }
 
+func (i *Instance) Running() bool { return !i.dead() }
+
 func (i *Instance) Fit() Fit {
 	i.mu.Lock()
 	defer i.mu.Unlock()

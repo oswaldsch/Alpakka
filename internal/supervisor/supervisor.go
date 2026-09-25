@@ -3,6 +3,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -29,7 +30,11 @@ type Supervisor struct {
 
 	mu  sync.Mutex
 	cur *Instance
+	// Kept after cur is torn down, so the log of a failed or evicted load can still be read.
+	last *Instance
 }
+
+var ErrNotLoaded = errors.New("not loaded")
 
 func New(llama config.Llama, wolMACs map[string]string, logf Logf) *Supervisor {
 	if logf == nil {
@@ -83,6 +88,7 @@ func (s *Supervisor) Ensure(ctx context.Context, rt config.Runtime) (*Instance, 
 			return nil, err
 		}
 		s.cur = inst
+		s.last = inst
 		s.mu.Unlock()
 
 		if err := inst.wait(ctx); err != nil {
@@ -130,6 +136,44 @@ func (s *Supervisor) Stop() {
 	if s.cur != nil {
 		s.cur.stop()
 		s.cur = nil
+	}
+}
+
+// Last is the most recently started instance, whether or not it is still running.
+func (s *Supervisor) Last() *Instance {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.last
+}
+
+// Unload stops the resident process ahead of its keep-alive and returns the model it
+// served. An empty model means whatever is resident, and nothing resident is not an
+// error then. Like a reload, it waits for responses still streaming rather than cut them off.
+func (s *Supervisor) Unload(ctx context.Context, model string) (string, error) {
+	for {
+		cur := s.Current()
+		if cur == nil || (model != "" && cur.rt.Model != model) {
+			if model == "" {
+				return "", nil
+			}
+			return "", fmt.Errorf("%s: %w", model, ErrNotLoaded)
+		}
+		// A load still in progress has a caller waiting on it, which gets its answer first.
+		_ = cur.wait(ctx)
+		if err := cur.waitIdle(ctx); err != nil {
+			return "", err
+		}
+
+		s.mu.Lock()
+		if s.cur == cur && !cur.busy() {
+			s.logf("unloading %s: requested", cur.rt.Model)
+			cur.stop()
+			s.cur = nil
+			s.mu.Unlock()
+			return cur.rt.Model, nil
+		}
+		// Replaced, or picked up another request, since it went idle.
+		s.mu.Unlock()
 	}
 }
 

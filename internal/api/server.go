@@ -59,6 +59,8 @@ func (s *Server) Handler() http.Handler {
 	// alpakka's own surface, outside both wire protocols so no ollama or OpenAI client reaches it by accident.
 	mux.HandleFunc("POST /alpakka/bench", s.handleBench)
 	mux.HandleFunc("GET /alpakka/status", s.handleBenchStatus)
+	mux.HandleFunc("POST /alpakka/unload", s.handleUnload)
+	mux.HandleFunc("GET /alpakka/logs", s.handleLogs)
 
 	// Writing to the model store is out of scope, so say so rather than half-implement it.
 	for _, p := range []string{"/api/pull", "/api/create", "/api/push", "/api/copy", "/api/delete"} {
