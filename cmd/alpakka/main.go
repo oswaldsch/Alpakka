@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	"github.com/oswaldsch/alpakka/internal/api"
@@ -27,23 +29,54 @@ func main() {
 	}
 }
 
+type command struct {
+	names   []string
+	summary string
+	run     func([]string) error
+}
+
+// A function rather than a variable, since help lists the table it is in.
+func commands() []command {
+	return []command{
+		{[]string{"serve"}, "run the server (the default with no command)", serve},
+		{[]string{"pull"}, "fetch a GGUF from HuggingFace into the first model root", pull},
+		{[]string{"list", "ls"}, "list the models the server can serve", list},
+		{[]string{"ps"}, "show the loaded model", ps},
+		{[]string{"show"}, "show a model's details, template or Modelfile", show},
+		{[]string{"run"}, "chat with a model, or answer one prompt", runModel},
+		{[]string{"stop"}, "unload the loaded model now", stop},
+		{[]string{"rm"}, "delete a model from its root", rm},
+		{[]string{"logs"}, "print llama-server's log for the last load", logs},
+		{[]string{"version"}, "print alpakka's and llama-server's versions", version},
+		{[]string{"help"}, "list the commands", help},
+	}
+}
+
 func run(args []string) error {
 	// Bare flags still start the server, as existing unit files invoke it.
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return serve(args)
 	}
-	cmd, rest := args[0], args[1:]
-	switch cmd {
-	case "serve":
-		return serve(rest)
-	case "pull":
-		return pull(rest)
-	case "list", "ls":
-		return list(rest)
-	case "ps":
-		return ps(rest)
+	name, rest := args[0], args[1:]
+	for _, c := range commands() {
+		if slices.Contains(c.names, name) {
+			return c.run(rest)
+		}
 	}
-	return fmt.Errorf("unknown command %q: expected serve, pull, list or ps", cmd)
+	return fmt.Errorf("unknown command %q: run `alpakka help` for the list", name)
+}
+
+func help([]string) error {
+	fmt.Println("usage: alpakka <command> [flags] [args]")
+	fmt.Println()
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	for _, c := range commands() {
+		fmt.Fprintf(tw, "  %s\t%s\n", strings.Join(c.names, ", "), c.summary)
+	}
+	tw.Flush()
+	fmt.Println()
+	fmt.Println("`alpakka <command> -h` lists a command's flags.")
+	return nil
 }
 
 func serve(args []string) error {

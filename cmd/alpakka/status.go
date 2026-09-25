@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -45,24 +48,32 @@ func ps(args []string) error {
 
 func serverHost(name string, args []string) (string, error) {
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
-	var (
-		configPath = fs.String("config", config.DefaultPath(), "path to config.toml")
-		host       = fs.String("host", "", "server address, default the configured listen address")
-	)
+	host := hostFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return "", err
 	}
 	if fs.NArg() != 0 {
 		return "", fmt.Errorf("%s takes no arguments", name)
 	}
-	if *host != "" {
-		return *host, nil
+	return host()
+}
+
+// Registers -config and -host, and returns the address to call once fs is parsed.
+func hostFlags(fs *flag.FlagSet) func() (string, error) {
+	var (
+		configPath = fs.String("config", config.DefaultPath(), "path to config.toml")
+		host       = fs.String("host", "", "server address, default the configured listen address")
+	)
+	return func() (string, error) {
+		if *host != "" {
+			return *host, nil
+		}
+		cfg, err := config.Load(*configPath)
+		if err != nil {
+			return "", err
+		}
+		return cfg.Server.Listen, nil
 	}
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		return "", err
-	}
-	return cfg.Server.Listen, nil
 }
 
 func getJSON(host, path string, v any) error {
@@ -72,8 +83,41 @@ func getJSON(host, path string, v any) error {
 		return fmt.Errorf("is alpakka running? %w", err)
 	}
 	defer resp.Body.Close()
+	return decodeResponse(resp, path, v)
+}
+
+// No timeout, since the server may first have to finish a response it is streaming.
+func postJSON(ctx context.Context, host, path string, body, v any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+host+path, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		if ctx.Err() != nil {
+			return context.Cause(ctx)
+		}
+		return fmt.Errorf("is alpakka running? %w", err)
+	}
+	defer resp.Body.Close()
+	return decodeResponse(resp, path, v)
+}
+
+// The server's {"error": ...} is the message worth showing, not the raw body.
+func decodeResponse(resp *http.Response, path string, v any) error {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		var e struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &e) == nil && e.Error != "" {
+			return errors.New(e.Error)
+		}
 		return fmt.Errorf("%s: %s: %s", path, resp.Status, body)
 	}
 	return json.NewDecoder(resp.Body).Decode(v)

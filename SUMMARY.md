@@ -194,6 +194,8 @@ These calls inspect state and do not load a model:
 curl -s http://127.0.0.1:11435/api/tags | jq
 curl -s http://127.0.0.1:11435/api/ps | jq
 curl -s http://127.0.0.1:11435/alpakka/status | jq
+alpakka logs -n 200     # llama-server stderr, kept after a failed load or eviction
+alpakka version         # llama-server build and which optional flags it has
 curl -s http://127.0.0.1:11435/api/show \
   -H 'Content-Type: application/json' \
   -d '{"model":"MODEL:TAG"}' | jq
