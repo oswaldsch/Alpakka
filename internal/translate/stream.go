@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -15,11 +16,16 @@ import (
 const sseData = "data: "
 
 // The terminating "[DONE]" event ends the stream without invoking fn.
+// ErrTruncated is a stream that ended without saying it was done, as when llama-server is
+// killed mid-response. Without it, a cut-off answer reads as a complete one.
+var ErrTruncated = errors.New("llama-server's stream ended before the response was finished")
+
 func ReadSSE(r io.Reader, fn func(*Chunk) error) error {
 	sc := bufio.NewScanner(r)
 	// A tool call with large arguments can push a single event past the default scanner limit.
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
+	finished := false
 	for sc.Scan() {
 		line := sc.Text()
 		if !strings.HasPrefix(line, sseData) {
@@ -37,11 +43,20 @@ func ReadSSE(r io.Reader, fn func(*Chunk) error) error {
 		if err := json.Unmarshal([]byte(payload), &c); err != nil {
 			return fmt.Errorf("decoding stream chunk: %w", err)
 		}
+		for _, ch := range c.Choices {
+			finished = finished || ch.FinishReason != ""
+		}
 		if err := fn(&c); err != nil {
 			return err
 		}
 	}
-	return sc.Err()
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	if !finished {
+		return ErrTruncated
+	}
+	return nil
 }
 
 type Accumulator struct {

@@ -2,6 +2,7 @@ package translate
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"sort"
 	"strings"
@@ -267,5 +268,21 @@ func TestSetReasoningEffort(t *testing.T) {
 		if len(kwargs) != 1 {
 			t.Errorf("effort %q: set %d keys, want 1", c.effort, len(kwargs))
 		}
+	}
+}
+
+func TestReadSSEReportsAStreamCutOffMidResponse(t *testing.T) {
+	cut := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"you \"}}]}\n"
+	if err := ReadSSE(strings.NewReader(cut), func(*Chunk) error { return nil }); !errors.Is(err, ErrTruncated) {
+		t.Errorf("err = %v, want ErrTruncated", err)
+	}
+
+	// llama.cpp does not always send [DONE] after its finish_reason, and that is a complete answer.
+	finished := cut + "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n"
+	if err := ReadSSE(strings.NewReader(finished), func(*Chunk) error { return nil }); err != nil {
+		t.Errorf("finished stream: %v", err)
+	}
+	if err := ReadSSE(strings.NewReader(cut+"data: [DONE]\n"), func(*Chunk) error { return nil }); err != nil {
+		t.Errorf("stream with [DONE]: %v", err)
 	}
 }
