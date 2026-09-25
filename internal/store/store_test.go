@@ -104,6 +104,25 @@ func TestDirGetResolvesTagAndProjector(t *testing.T) {
 	if m.Template != toolTemplate {
 		t.Errorf("Template = %q, want the GGUF chat template", m.Template)
 	}
+	if m.ProjectorShared {
+		t.Error("a projector named for the tag was reported as shared")
+	}
+}
+
+func TestDirRepoProjectorIsShared(t *testing.T) {
+	root := t.TempDir()
+	kv := map[string]any{"general.architecture": "qwen35", "general.file_type": uint32(15)}
+	gguftest.Write(t, filepath.Join(root, "vl", "q4-k-m.gguf"), kv)
+	gguftest.Write(t, filepath.Join(root, "vl", "q8-0.gguf"), kv)
+	gguftest.Write(t, filepath.Join(root, "vl", "mmproj-F16.gguf"), kv)
+
+	m, err := New(nil, root).Get("vl:q4-k-m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(m.ProjectorPath, "mmproj-F16.gguf") || !m.ProjectorShared {
+		t.Errorf("ProjectorPath = %s, shared = %t, want the repo projector, shared", m.ProjectorPath, m.ProjectorShared)
+	}
 }
 
 func TestDirBareNameNeedsAUniqueTag(t *testing.T) {
@@ -222,6 +241,9 @@ func TestDirSplitModelIsOneTag(t *testing.T) {
 	}
 	if !strings.HasSuffix(models[0].ModelPath, "q4-k-m-00001-of-00003.gguf") {
 		t.Errorf("ModelPath = %s, want the first part", models[0].ModelPath)
+	}
+	if len(models[0].Parts) != 3 || models[0].Parts[0] != models[0].ModelPath {
+		t.Errorf("Parts = %v, want all three with the first as ModelPath", models[0].Parts)
 	}
 	// llama.cpp loads every part, so /api/tags has to report all of them.
 	if want := 3 * int64(len(gguftest.Bytes(kv))); models[0].Size != want {
